@@ -31,10 +31,3 @@ PyHEARTS bridges this gap by providing a transparent and physiologically interpr
 - **Transparent and configurable**: Every run saves full parameter configuration and analysis metadata.
 
 ---
-
-## Installation  
-
-```bash
-git clone https://github.com/ucsd-voyteklab/pyhearts.git
-cd pyhearts
-pip install -e .
