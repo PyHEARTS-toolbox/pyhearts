@@ -10,14 +10,19 @@ from .version import __version__
 from .config import ProcessCycleConfig
 from .core.fit import PyHEARTS
 
-# Signal generation
-from .sim import generate_ecg_signal
-
 # Submodules
 from . import feature
 from . import fitmetrics
 from . import plots
 from . import processing
+
+# Signal generation (optional - requires neurokit2 which needs Python 3.10+)
+try:
+    from .sim import generate_ecg_signal
+    _HAS_SIM = True
+except (ImportError, TypeError):
+    generate_ecg_signal = None  # type: ignore[assignment, misc]
+    _HAS_SIM = False
 
 __all__ = [
     # Version
@@ -25,7 +30,7 @@ __all__ = [
     # Core
     "PyHEARTS",
     "ProcessCycleConfig",
-    # Utilities
+    # Utilities (optional)
     "generate_ecg_signal",
     # Submodules
     "feature",
