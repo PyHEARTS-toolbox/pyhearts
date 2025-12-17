@@ -105,11 +105,7 @@ cython_debug/
 .DS_Store
 
 # Project-specific
-*.csv
 *.pdf
-*.png
-*.jpg
-*.jpeg
 !docs/**/*.png
 !docs/**/*.jpg
 
@@ -117,4 +113,12 @@ cython_debug/
 # data/
 # raw_data/
 # results/
+
+# Benchmark test data (large files - regenerate with generate_test_data.py)
+benchmark/test_data/
+benchmark/test_data_full/
+*.npy
+
+# Keep benchmark results for tracking
+!benchmark/results/*.csv
 

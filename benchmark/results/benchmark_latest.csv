@@ -1,0 +1,7 @@
+signal_id,sampling_rate,heart_rate,noise_level,n_true_peaks,n_detected_peaks,true_positives,false_positives,false_negatives,sensitivity,precision,f1_score,mean_timing_error_ms,std_timing_error_ms,max_timing_error_ms,processing_time_sec,success,error_message
+ecg_250hz_75bpm_clean_seed43,250,75,clean,74,74,74,0,0,1.0,1.0,1.0,0.0,0.0,0.0,0.5552318330010166,True,
+ecg_250hz_75bpm_moderate_seed44,250,75,moderate,74,75,74,1,0,1.0,0.9866666666666667,0.9932885906040269,0.0,2.789943329851663,4.0,0.5818045839987462,True,
+ecg_250hz_75bpm_extreme_seed45,250,75,extreme,74,6,6,0,68,0.08108108108108109,1.0,0.15,0.0,4.0,4.0,0.06133295900144731,True,
+ecg_1000hz_75bpm_clean_seed46,1000,75,clean,74,75,74,1,0,1.0,0.9866666666666667,0.9932885906040269,0.0,0.0,0.0,0.6341261249981471,True,
+ecg_1000hz_75bpm_moderate_seed47,1000,75,moderate,74,74,74,0,0,1.0,1.0,1.0,0.06756756756756757,2.467798455791639,5.0,0.746508874999563,True,
+ecg_1000hz_75bpm_extreme_seed48,1000,75,extreme,74,6,6,0,68,0.08108108108108109,1.0,0.15,-0.8333333333333334,2.1147629234082532,4.0,0.1719674580017454,True,
