@@ -1,0 +1,142 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyhearts"
+version = "1.0.0"
+description = "Beat-by-beat ECG waveform morphology mapping for interpretable machine learning and AI"
+readme = "README.md"
+license = {text = "Proprietary - UC Regents"}
+authors = [
+    {name = "Morgan Fitzgerald"}
+]
+maintainers = [
+    {name = "Morgan Fitzgerald"}
+]
+keywords = [
+    "ECG",
+    "electrocardiogram",
+    "heart rate variability",
+    "HRV",
+    "cardiac",
+    "waveform analysis",
+    "signal processing",
+    "biomedical",
+    "physiology",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Healthcare Industry",
+    "License :: Other/Proprietary License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
+    "Typing :: Typed",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.20.0",
+    "pandas>=1.3.0",
+    "scipy>=1.7.0",
+    "PyWavelets>=1.1.0",
+    "matplotlib>=3.4.0",
+    "neurokit2>=0.2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "coverage>=7.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+    "pandas-stubs>=1.5.0",
+]
+docs = [
+    "sphinx>=6.0.0",
+    "sphinx-rtd-theme>=1.0.0",
+    "myst-parser>=1.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/voytek-lab/pyhearts"
+Documentation = "https://pyhearts.readthedocs.io"
+Repository = "https://github.com/voytek-lab/pyhearts"
+Issues = "https://github.com/voytek-lab/pyhearts/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pyhearts*"]
+exclude = ["tests*", "docs*", "htmlcov*"]
+
+[tool.setuptools.package-data]
+pyhearts = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+]
+
+[tool.coverage.run]
+source = ["pyhearts"]
+branch = true
+omit = [
+    "*/tests/*",
+    "*/__pycache__/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+]
+show_missing = true
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # Pyflakes
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "UP",     # pyupgrade
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "B008",   # do not perform function calls in argument defaults
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["pyhearts"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+

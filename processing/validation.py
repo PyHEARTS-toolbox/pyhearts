@@ -1,13 +1,15 @@
+from __future__ import annotations
+
 from functools import partial
-from typing import Mapping, Optional, Tuple, Literal
+from typing import Dict, Mapping, Optional, Tuple, Literal, Union
 
 import numpy as np
 from pyhearts.config import ProcessCycleConfig
 
-# Type aliases
-Peak = tuple[int | None, float | None]
+# Type aliases (Python 3.9 compatible)
+Peak = Tuple[Optional[int], Optional[float]]
 Peaks = Mapping[str, Peak]
-ValidatedPeaks = dict[str, Peak]
+ValidatedPeaks = Dict[str, Peak]
 
 
 def validate_peaks(

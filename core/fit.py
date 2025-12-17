@@ -1,18 +1,18 @@
-import logging
-import numpy as np
-import pandas as pd
-from typing import Optional, Tuple, Any, Literal
-
+from __future__ import annotations
 
 import json
+import logging
 import platform
-import sys
-from dataclasses import asdict
-from pathlib import Path
-from hashlib import sha256
 import subprocess
+import sys
+from dataclasses import asdict, replace
+from hashlib import sha256
+from pathlib import Path
+from typing import Any, Literal, Optional, Tuple
 
-from pyhearts.config import ProcessCycleConfig   
+import numpy as np
+import pandas as pd
+from pyhearts.config import ProcessCycleConfig
 from pyhearts.feature import calc_hrv_metrics
 from pyhearts.processing import (
     epoch_ecg,
@@ -21,10 +21,6 @@ from pyhearts.processing import (
     process_cycle,
     r_peak_detection,
 )
-
-
-from typing import Optional, Tuple, Any, Literal
-from dataclasses import replace
 
 class PyHEARTS:
     """

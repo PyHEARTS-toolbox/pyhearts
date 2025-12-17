@@ -3,7 +3,7 @@ from typing import Optional, Tuple, Union
 import numpy as np
 from scipy.signal import find_peaks
 import pywt
-import pyhearts.plts
+import pyhearts.plots
 from pyhearts.config import ProcessCycleConfig
 
 
@@ -108,7 +108,7 @@ def calc_wavelet_dynamic_offset(
         if plot and xs is not None:
             xs_arr = np.asarray(xs)
             if xs_arr.shape == sig.shape:
-                pyhearts.plts.plot_dynamic_offset(
+                pyhearts.plots.plot_dynamic_offset(
                     xs=xs_arr,
                     sig=sig,
                     r_center_idx=int(r_center_idx),

@@ -6,7 +6,7 @@ import pywt
 from pyhearts.config import ProcessCycleConfig   
 
 
-from pyhearts.plts import plot_epochs
+from pyhearts.plots import plot_epochs
 
 
 

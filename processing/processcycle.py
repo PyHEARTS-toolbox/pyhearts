@@ -10,7 +10,7 @@ from scipy.optimize import curve_fit
 from pyhearts.config import ProcessCycleConfig
 from pyhearts.feature import calc_intervals, interval_ms, extract_shape_features
 from pyhearts.fitmetrics import calc_r_squared, calc_rmse
-from pyhearts.plts import plot_fit, plot_labeled_peaks, plot_rise_decay
+from pyhearts.plots import plot_fit, plot_labeled_peaks, plot_rise_decay
 from .bounds import calc_bounds
 from .detrend import detrend_signal
 from .gaussian import compute_gauss_std, gaussian_function

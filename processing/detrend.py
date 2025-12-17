@@ -1,7 +1,7 @@
 from typing import Optional, Tuple
 import numpy as np
 from scipy.stats import linregress
-from pyhearts.plts import plot_detrended_cycle  # Importing PyHEARTS plot function
+from pyhearts.plots import plot_detrended_cycle
 
 
 def detrend_signal(

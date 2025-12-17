@@ -65,7 +65,7 @@ def r_peak_detection(
                 (final_filtered_r_peaks >= start_idx) & (final_filtered_r_peaks < end_idx)
             ] - start_idx
 
-            ph.plts.plot_rpeaks(
+            ph.plots.plot_rpeaks(
                 ecg_segment,
                 sampling_rate,
                 peaks_in_window,
@@ -73,7 +73,7 @@ def r_peak_detection(
                 title="ECG (windowed) with R-peaks",
             )
         else:
-            ph.plts.plot_rpeaks(
+            ph.plots.plot_rpeaks(
                 ecg,
                 sampling_rate,
                 final_filtered_r_peaks,
