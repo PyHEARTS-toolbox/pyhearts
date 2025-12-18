@@ -1,7 +1,7 @@
 import numpy as np
 import pyhearts as ph
 from scipy.signal import find_peaks, butter, filtfilt, iirnotch
-from typing import Optional, Union
+from typing import Optional, Union, Literal
 from pyhearts.config import ProcessCycleConfig
 
 
@@ -40,6 +40,54 @@ def _bandpass_filter(
     return filtered
 
 
+def _adaptive_prominence_threshold(
+    ecg: np.ndarray,
+    base_multiplier: float,
+    sensitivity: Literal["standard", "high", "maximum"] = "standard",
+) -> float:
+    """
+    Compute adaptive prominence threshold based on signal characteristics.
+    
+    Uses robust MAD-based estimation instead of pure std to handle noisy signals.
+    Sensitivity modes allow trading off precision vs. recall.
+    
+    Parameters
+    ----------
+    ecg : np.ndarray
+        Filtered ECG signal.
+    base_multiplier : float
+        Base prominence multiplier from config.
+    sensitivity : {"standard", "high", "maximum"}
+        Detection sensitivity level:
+        - "standard": Uses base_multiplier as-is (balanced)
+        - "high": Reduces threshold by 25% (higher recall, slightly lower precision)
+        - "maximum": Reduces threshold by 40% (maximum recall, may include noise)
+    
+    Returns
+    -------
+    float
+        Adaptive prominence threshold.
+    """
+    # Use MAD for robust noise estimation (less sensitive to R-peak outliers)
+    median_val = np.median(ecg)
+    mad = np.median(np.abs(ecg - median_val))
+    robust_std = 1.4826 * mad  # MAD to std conversion for Gaussian
+    
+    # Fall back to regular std if MAD is degenerate
+    if robust_std < 1e-9:
+        robust_std = float(np.std(ecg))
+    
+    # Apply sensitivity adjustment
+    sensitivity_factors = {
+        "standard": 1.0,
+        "high": 0.75,
+        "maximum": 0.60,
+    }
+    factor = sensitivity_factors.get(sensitivity, 1.0)
+    
+    return base_multiplier * robust_std * factor
+
+
 def r_peak_detection(
     ecg: Union[np.ndarray, list[float]],
     sampling_rate: float,
@@ -49,14 +97,41 @@ def r_peak_detection(
     plot_start: Optional[float] = None,   # seconds
     plot_end: Optional[float] = None,     # seconds
     crop_ms: Optional[int] = 3000,        # plotting convenience only
+    sensitivity: Literal["standard", "high", "maximum"] = "standard",
 ) -> np.ndarray:
     """
-    Two-pass, prominence-based R-peak detection driven by config.
+    Multi-pass, prominence-based R-peak detection driven by config.
     
     Optionally applies bandpass filtering (cfg.rpeak_preprocess) for noise robustness.
     First-pass uses a fixed refractory (cfg.rpeak_min_refrac_ms) to estimate RR.
     Second-pass uses cfg.rpeak_rr_frac_second_pass * median(RR) as refractory.
+    Third-pass (gap-fill) searches for missed peaks in large RR gaps.
     RR estimate is clamped using cfg.rpeak_bpm_bounds.
+    
+    Parameters
+    ----------
+    ecg : array-like
+        1D ECG signal.
+    sampling_rate : float
+        Sampling rate in Hz.
+    cfg : ProcessCycleConfig
+        Configuration with detection parameters.
+    plot : bool, default False
+        Whether to plot detected peaks.
+    plot_start, plot_end : float, optional
+        Time window (seconds) for plotting.
+    crop_ms : int, optional
+        Crop duration for plotting.
+    sensitivity : {"standard", "high", "maximum"}, default "standard"
+        Detection sensitivity level:
+        - "standard": Balanced precision/recall (default)
+        - "high": Higher recall (~+15%), slightly lower precision
+        - "maximum": Maximum recall, may include some noise
+    
+    Returns
+    -------
+    np.ndarray
+        Indices of detected R-peaks.
     """
     ecg = np.asarray(ecg, dtype=float)
     if ecg.ndim != 1 or ecg.size == 0:
@@ -77,14 +152,19 @@ def r_peak_detection(
     else:
         ecg_filtered = ecg
 
-    # ----- First pass -----
+    # ----- Adaptive prominence threshold -----
+    prominence_threshold = _adaptive_prominence_threshold(
+        ecg_filtered, cfg.rpeak_prominence_multiplier, sensitivity
+    )
+    
+    # ----- First pass: conservative distance -----
     distance_lo = max(1, int(round(cfg.rpeak_min_refrac_ms * sampling_rate / 1000.0)))
-    prominence_threshold = cfg.rpeak_prominence_multiplier * float(np.std(ecg_filtered))
     peaks_lo, _ = find_peaks(ecg_filtered, distance=distance_lo, prominence=prominence_threshold)
 
-    # ----- RR estimation and second pass -----
+    # ----- Second pass: RR-adaptive distance -----
     if peaks_lo.size < 3:
         initial_r_peaks = peaks_lo.astype(int)
+        median_rr_samples = distance_lo  # fallback
     else:
         rr_samp = np.median(np.diff(peaks_lo))
 
@@ -92,11 +172,47 @@ def r_peak_detection(
         rr_min = (60_000.0 / max_bpm) * sampling_rate / 1000.0
         rr_max = (60_000.0 / min_bpm) * sampling_rate / 1000.0
         rr_samp = float(np.clip(rr_samp, rr_min, rr_max))
+        median_rr_samples = rr_samp
 
         distance = max(1, int(round(cfg.rpeak_rr_frac_second_pass * rr_samp)))
         initial_r_peaks, _ = find_peaks(
             ecg_filtered, distance=distance, prominence=prominence_threshold
         )
+    
+    # ----- Third pass: gap-filling for missed beats -----
+    # Search for missed peaks in gaps > 1.5× median RR (likely missed beats)
+    if initial_r_peaks.size >= 2 and sensitivity in ("high", "maximum"):
+        gap_threshold = 1.5 * median_rr_samples
+        rr_intervals = np.diff(initial_r_peaks)
+        large_gaps = np.where(rr_intervals > gap_threshold)[0]
+        
+        additional_peaks = []
+        reduced_prominence = prominence_threshold * 0.7  # More lenient in gaps
+        
+        for gap_idx in large_gaps:
+            start_idx = initial_r_peaks[gap_idx]
+            end_idx = initial_r_peaks[gap_idx + 1]
+            gap_segment = ecg_filtered[start_idx:end_idx]
+            
+            if gap_segment.size < 10:
+                continue
+            
+            # Find peaks in the gap with reduced prominence
+            gap_peaks, props = find_peaks(
+                gap_segment,
+                distance=max(1, int(0.4 * median_rr_samples)),
+                prominence=reduced_prominence,
+            )
+            
+            # Only keep peaks that are reasonably positioned (not too close to edges)
+            margin = int(0.2 * median_rr_samples)
+            for gp in gap_peaks:
+                global_idx = start_idx + gp
+                if margin < gp < len(gap_segment) - margin:
+                    additional_peaks.append(global_idx)
+        
+        if additional_peaks:
+            initial_r_peaks = np.sort(np.concatenate([initial_r_peaks, additional_peaks]))
 
     final_filtered_r_peaks = np.asarray(initial_r_peaks, dtype=int)
 

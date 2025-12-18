@@ -23,18 +23,22 @@ class TestProcessCycleConfigDefaults:
         assert cfg is not None
 
     def test_default_values(self):
-        """Check key default values are set correctly."""
+        """Check key default values are set correctly.
+        
+        Note: Defaults were optimized based on QTDB benchmark (Dec 2024)
+        to improve detection recall while maintaining accuracy.
+        """
         cfg = ProcessCycleConfig()
         
-        # R-peak detection defaults
-        assert cfg.rpeak_prominence_multiplier == 3.0
+        # R-peak detection defaults (optimized from 3.0→2.5 for better recall)
+        assert cfg.rpeak_prominence_multiplier == 2.5
         assert cfg.rpeak_min_refrac_ms == 100.0
-        assert cfg.rpeak_rr_frac_second_pass == 0.55
+        assert cfg.rpeak_rr_frac_second_pass == 0.50  # lowered from 0.55
         assert cfg.rpeak_bpm_bounds == (40.0, 900.0)
         
-        # Epoching defaults
-        assert cfg.epoch_corr_thresh == 0.80
-        assert cfg.epoch_var_thresh == 5.0
+        # Epoching defaults (relaxed for better beat retention)
+        assert cfg.epoch_corr_thresh == 0.70  # lowered from 0.80
+        assert cfg.epoch_var_thresh == 6.0    # raised from 5.0
         
         # Wavelet defaults
         assert cfg.wavelet_name == "db6"

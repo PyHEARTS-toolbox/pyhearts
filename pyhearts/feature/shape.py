@@ -114,7 +114,7 @@ def compute_voltage_integrals(
             continue
 
         # Integrate in mV·s, then convert to µV·ms
-        area_mv_s = np.trapz(segment, dx=dt)
+        area_mv_s = np.trapezoid(segment, dx=dt)
         result[key] = float(area_mv_s * 1e6)  # µV·ms
 
     return result
@@ -222,6 +222,44 @@ def calc_sharpness_derivative(
 
 
 
+def _find_derivative_zero_crossing(
+    sig: np.ndarray,
+    start_idx: int,
+    direction: int,  # -1 for left, +1 for right
+    max_steps: int,
+    min_derivative_threshold: float = 1e-6,
+) -> int:
+    """
+    Find where the derivative approaches zero (wave onset/offset).
+    
+    This is more robust than threshold-based detection for low-amplitude waves.
+    """
+    n = len(sig)
+    current = start_idx
+    
+    # Compute derivative sign at starting point
+    if direction == -1:
+        # Going left: looking for where derivative changes from negative to ~zero
+        for _ in range(max_steps):
+            if current <= 1:
+                break
+            deriv = sig[current] - sig[current - 1]
+            if abs(deriv) < min_derivative_threshold:
+                break
+            current -= 1
+    else:
+        # Going right: looking for where derivative changes from positive to ~zero
+        for _ in range(max_steps):
+            if current >= n - 2:
+                break
+            deriv = sig[current + 1] - sig[current]
+            if abs(deriv) < min_derivative_threshold:
+                break
+            current += 1
+    
+    return current
+
+
 def find_asymmetric_bounds_stdguided(
     sig: np.ndarray,
     center_idx: int,
@@ -235,6 +273,13 @@ def find_asymmetric_bounds_stdguided(
     """
     Find asymmetric left/right bounds around a signal peak using
     standard deviation and physiologic window constraints.
+    
+    Uses a hybrid approach:
+    1. Primary: threshold-based crossing at cfg.threshold_fraction of peak height
+    2. Fallback extension: derivative-based refinement for low-amplitude P/T waves
+    
+    The derivative-based extension helps address systematic underestimation
+    of PR and QT intervals by capturing more of the wave onset/offset.
 
     Parameters:
         sig (np.ndarray): Input signal array.
@@ -270,6 +315,7 @@ def find_asymmetric_bounds_stdguided(
     left_idx = center_idx
     right_idx = center_idx
 
+    # Primary: threshold-based crossing
     if height >= 0:
         while left_idx > max_left and sig[left_idx] > thr:
             left_idx -= 1
@@ -280,6 +326,43 @@ def find_asymmetric_bounds_stdguided(
             left_idx -= 1
         while right_idx < max_right and sig[right_idx] < thr:
             right_idx += 1
+    
+    # Derivative-based extension for P and T waves (addresses interval biases)
+    # Only apply to P and T waves which showed systematic underestimation
+    if comp_label in ("P", "T"):
+        # Compute baseline noise level for derivative threshold
+        segment = sig[max_left:max_right + 1]
+        if len(segment) > 5:
+            baseline_deriv = np.median(np.abs(np.diff(segment))) * 0.3
+        else:
+            baseline_deriv = abs(height) * 0.02
+        
+        # Extension allowance: up to 20% more samples beyond threshold crossing
+        extension_budget = max(2, int(0.20 * (center_idx - left_idx)))
+        
+        # Extend left boundary if derivative is still significant
+        extended_left = left_idx
+        for _ in range(extension_budget):
+            if extended_left <= max_left + 1:
+                break
+            deriv = abs(sig[extended_left] - sig[extended_left - 1])
+            if deriv < baseline_deriv:
+                break
+            extended_left -= 1
+        
+        # Extend right boundary similarly
+        extension_budget = max(2, int(0.20 * (right_idx - center_idx)))
+        extended_right = right_idx
+        for _ in range(extension_budget):
+            if extended_right >= max_right - 1:
+                break
+            deriv = abs(sig[extended_right + 1] - sig[extended_right])
+            if deriv < baseline_deriv:
+                break
+            extended_right += 1
+        
+        left_idx = extended_left
+        right_idx = extended_right
 
     return left_idx, right_idx
 

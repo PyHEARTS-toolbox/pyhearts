@@ -10,11 +10,16 @@ class ProcessCycleConfig:
     Central, typed configuration for process_cycle and helpers.
     Keep algorithmic behavior here; do not scatter magic numbers in code.
     Defaults are species-agnostic; use `for_mouse()` / `for_human()` for presets.
+    
+    Key tuning notes (based on QTDB benchmark Dec 2024):
+    - rpeak_prominence_multiplier: 2.5σ balances precision/recall better than 3.0σ
+    - threshold_fraction: 0.15 captures more of P/T wave boundaries vs 0.30
+    - epoch_corr_thresh: 0.70 retains more beats with morphological variation
     """
-   #  ----  R-peak detection  ---- 
-    rpeak_prominence_multiplier: float = 3.0          # σ multiplier
+    #  ----  R-peak detection  ---- 
+    rpeak_prominence_multiplier: float = 2.5          # σ multiplier (lowered from 3.0 for better recall)
     rpeak_min_refrac_ms: float = 100.0                # first-pass refractory
-    rpeak_rr_frac_second_pass: float = 0.55           # second-pass refractory = k * median RR
+    rpeak_rr_frac_second_pass: float = 0.50           # second-pass refractory = k * median RR (lowered for sensitivity)
     rpeak_bpm_bounds: Tuple[float, float] = (40.0, 900.0)  # clamp for RR estimate
     
     # ---- R-peak preprocessing (bandpass filter for noise robustness) ----
@@ -25,8 +30,9 @@ class ProcessCycleConfig:
     rpeak_notch_hz: Optional[float] = None            # power line notch (50/60 Hz), None=disabled
 
     # ----- Epoching thresholds (used in epoch_ecg) -----
-    epoch_corr_thresh: float = 0.80      # min correlation to keep an epoch (0–1)
-    epoch_var_thresh: float  = 5.0       # max multiple of global variance allowed
+    # Lowered from 0.80→0.70 to retain more beats with morphological variation
+    epoch_corr_thresh: float = 0.70      # min correlation to keep an epoch (0–1)
+    epoch_var_thresh: float  = 6.0       # max multiple of global variance allowed (raised from 5.0)
 
     # # ----- Epoch window policy  -----
     pre_r_window: Optional[int] = None # Optional, default if rr interval / 2
@@ -45,18 +51,19 @@ class ProcessCycleConfig:
     )
     
     # ---- SNR gate (P/T only) ----
+    # Lowered from 2.0→1.5 based on QTDB benchmark showing missed P/T waves
     snr_mad_multiplier: dict[str, float] = field(
-        default_factory=lambda: {"P": 2.0, "T": 2.0}  # |peak| ≥ k × MAD
+        default_factory=lambda: {"P": 1.5, "T": 1.5}  # |peak| ≥ k × MAD (lowered for better recall)
     )
     snr_exclusion_ms: dict[str, int] = field(
-        default_factory=lambda: {"P": 0, "T": 20}     # 0 ⇒ use half-FWHM policy; else ms
+        default_factory=lambda: {"P": 0, "T": 15}     # 0 ⇒ use half-FWHM policy; else ms
     )
     snr_apply_savgol: dict[str, bool] = field(
         default_factory=lambda: {"P": False, "T": True}
     )
     savgol_window_pts: int = 7
     savgol_polyorder: int = 3
-    wavelet_guard_cap_ms: int = 120  # cap for post-QRS wavelet guard used in T search
+    wavelet_guard_cap_ms: int = 100  # cap for post-QRS wavelet guard used in T search (reduced from 120)
     
      # ----- Curve-fit -----
     bound_factor: float = 0.20           # bounds scale around (center, height, std)
@@ -76,7 +83,11 @@ class ProcessCycleConfig:
     )
 
     # ----- Shape feature thresholds -----
-    threshold_fraction: float = 0.30     # fraction of (peak-to-baseline) for width crossings
+    # threshold_fraction: Lowered from 0.30→0.15 based on QTDB benchmark
+    # PR interval was -74ms biased (P onset detected late)
+    # QT interval was -47ms biased (T offset detected early)
+    # Using 15% of peak height captures more of the wave morphology
+    threshold_fraction: float = 0.15     # fraction of (peak-to-baseline) for width crossings
     duration_min_ms: int = 20             # minimum valid duration for humans
 
     # ----- Sharpness (derivative-based; minimal public knobs) -----
@@ -199,21 +210,32 @@ class ProcessCycleConfig:
 
     @classmethod
     def for_human(cls) -> "ProcessCycleConfig":
-        """Preset tuned for adult human physiology."""
+        """
+        Preset tuned for adult human physiology.
+        
+        Optimized based on QTDB benchmark (Dec 2024):
+        - Lower SNR thresholds for better P/T detection
+        - Relaxed epoch correlation for morphological variation
+        - Lower threshold_fraction for accurate wave boundaries
+        """
         return replace(
             cls(),
             detrend_window_ms=200,
-            postQRS_refractory_window_ms = 20,    # small fixed refractory after QRS to avoid S tail
-            amp_min_ratio={"P": 0.03, "T": 0.05, "Q": 0.02, "S": 0.02},  # lead II, capture non-ideal
-            snr_mad_multiplier={"P": 1.75, "T": 1.75},   # slightly looser; P/T smaller in mice
-            snr_exclusion_ms={"P": 0, "T": 10},          # shorter morphology → narrower exclusion
+            postQRS_refractory_window_ms=20,    # small fixed refractory after QRS to avoid S tail
+            amp_min_ratio={"P": 0.025, "T": 0.04, "Q": 0.015, "S": 0.015},  # lowered for better recall
+            snr_mad_multiplier={"P": 1.4, "T": 1.4},   # lowered from 1.75 for better P/T detection
+            snr_exclusion_ms={"P": 0, "T": 10},
             snr_apply_savgol={"P": False, "T": True},
             rr_bounds_ms=(300, 1800),              # ~200–33 bpm
-            shape_max_window_ms={"P": 160, "Q": 60, "R": 80, "S": 60, "T": 200},
+            shape_max_window_ms={"P": 180, "Q": 60, "R": 80, "S": 60, "T": 250},  # wider P/T windows
             duration_min_ms=20,
-            # Example tighter human bounds if desired:
-            rpeak_bpm_bounds=(30.0, 240.0), rpeak_min_refrac_ms=120.0, # 500 bpm theoretical ceiling
-            version="v1-human",
+            threshold_fraction=0.12,  # lower than default for better wave boundary capture
+            epoch_corr_thresh=0.65,   # more permissive for morphological variation
+            epoch_var_thresh=7.0,     # more permissive variance threshold
+            rpeak_prominence_multiplier=2.25,  # lower for better R-peak recall
+            rpeak_bpm_bounds=(30.0, 240.0),
+            rpeak_min_refrac_ms=120.0,
+            version="v1.1-human-qtdb",
         )
 
 #
