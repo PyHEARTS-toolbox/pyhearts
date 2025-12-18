@@ -179,15 +179,29 @@ def r_peak_detection(
             ecg_filtered, distance=distance, prominence=prominence_threshold
         )
     
+    # ----- Amplitude filtering: remove P/T waves detected as R-peaks -----
+    # R-peaks should be the tallest peaks. Filter out peaks that are much
+    # smaller than the maximum (likely P or T waves).
+    if initial_r_peaks.size > 0:
+        peak_heights = ecg_filtered[initial_r_peaks]
+        max_peak_height = np.max(peak_heights)
+        
+        # Keep only peaks that are at least 40% of the max height
+        # (R-peaks are typically 2-10x taller than P/T waves)
+        height_threshold = 0.4 * max_peak_height
+        amplitude_mask = peak_heights >= height_threshold
+        initial_r_peaks = initial_r_peaks[amplitude_mask]
+    
     # ----- Third pass: gap-filling for missed beats -----
-    # Search for missed peaks in gaps > 1.5× median RR (likely missed beats)
-    if initial_r_peaks.size >= 2 and sensitivity in ("high", "maximum"):
-        gap_threshold = 1.5 * median_rr_samples
+    # Search for missed peaks in gaps > 1.8× median RR (likely missed beats)
+    # Only enabled for "maximum" sensitivity to avoid T-peak false positives
+    if initial_r_peaks.size >= 2 and sensitivity == "maximum":
+        gap_threshold = 1.8 * median_rr_samples  # More conservative: 1.8x instead of 1.5x
         rr_intervals = np.diff(initial_r_peaks)
         large_gaps = np.where(rr_intervals > gap_threshold)[0]
         
         additional_peaks = []
-        reduced_prominence = prominence_threshold * 0.7  # More lenient in gaps
+        reduced_prominence = prominence_threshold * 0.8  # Less lenient: 0.8 instead of 0.7
         
         for gap_idx in large_gaps:
             start_idx = initial_r_peaks[gap_idx]
@@ -200,15 +214,20 @@ def r_peak_detection(
             # Find peaks in the gap with reduced prominence
             gap_peaks, props = find_peaks(
                 gap_segment,
-                distance=max(1, int(0.4 * median_rr_samples)),
+                distance=max(1, int(0.5 * median_rr_samples)),  # Larger min distance
                 prominence=reduced_prominence,
             )
             
-            # Only keep peaks that are reasonably positioned (not too close to edges)
-            margin = int(0.2 * median_rr_samples)
+            # Only keep peaks that are:
+            # 1. Reasonably positioned (not too close to edges)
+            # 2. Actually tall enough to be R-peaks (not T-peaks)
+            margin = int(0.25 * median_rr_samples)
+            r_peak_height_threshold = np.max(ecg_filtered[initial_r_peaks]) * 0.5
+            
             for gp in gap_peaks:
                 global_idx = start_idx + gp
-                if margin < gp < len(gap_segment) - margin:
+                peak_height = gap_segment[gp]
+                if margin < gp < len(gap_segment) - margin and peak_height > r_peak_height_threshold:
                     additional_peaks.append(global_idx)
         
         if additional_peaks:

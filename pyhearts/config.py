@@ -83,11 +83,12 @@ class ProcessCycleConfig:
     )
 
     # ----- Shape feature thresholds -----
-    # threshold_fraction: Lowered from 0.30→0.15 based on QTDB benchmark
+    # threshold_fraction: Lowered from 0.30→0.20 based on QTDB benchmark
     # PR interval was -74ms biased (P onset detected late)
     # QT interval was -47ms biased (T offset detected early)
-    # Using 15% of peak height captures more of the wave morphology
-    threshold_fraction: float = 0.15     # fraction of (peak-to-baseline) for width crossings
+    # Using 20% of peak height captures more wave morphology while staying robust
+    # Note: 0.15 was too aggressive and caused issues with validation
+    threshold_fraction: float = 0.20     # fraction of (peak-to-baseline) for width crossings
     duration_min_ms: int = 20             # minimum valid duration for humans
 
     # ----- Sharpness (derivative-based; minimal public knobs) -----
@@ -214,28 +215,28 @@ class ProcessCycleConfig:
         Preset tuned for adult human physiology.
         
         Optimized based on QTDB benchmark (Dec 2024):
-        - Lower SNR thresholds for better P/T detection
         - Relaxed epoch correlation for morphological variation
-        - Lower threshold_fraction for accurate wave boundaries
+        - Moderate threshold_fraction for accurate wave boundaries
+        - Balanced SNR thresholds to maintain T-wave detection
         """
         return replace(
             cls(),
             detrend_window_ms=200,
             postQRS_refractory_window_ms=20,    # small fixed refractory after QRS to avoid S tail
             amp_min_ratio={"P": 0.025, "T": 0.04, "Q": 0.015, "S": 0.015},  # lowered for better recall
-            snr_mad_multiplier={"P": 1.4, "T": 1.4},   # lowered from 1.75 for better P/T detection
+            snr_mad_multiplier={"P": 1.6, "T": 1.6},   # balanced: between 1.4 (too low) and 2.0 (too high)
             snr_exclusion_ms={"P": 0, "T": 10},
             snr_apply_savgol={"P": False, "T": True},
             rr_bounds_ms=(300, 1800),              # ~200–33 bpm
-            shape_max_window_ms={"P": 180, "Q": 60, "R": 80, "S": 60, "T": 250},  # wider P/T windows
+            shape_max_window_ms={"P": 160, "Q": 60, "R": 80, "S": 60, "T": 220},  # slightly wider T window
             duration_min_ms=20,
-            threshold_fraction=0.12,  # lower than default for better wave boundary capture
-            epoch_corr_thresh=0.65,   # more permissive for morphological variation
-            epoch_var_thresh=7.0,     # more permissive variance threshold
+            threshold_fraction=0.18,  # moderate: between 0.15 (too low) and 0.30 (too high)
+            epoch_corr_thresh=0.68,   # more permissive but not too loose
+            epoch_var_thresh=6.5,     # more permissive variance threshold
             rpeak_prominence_multiplier=2.25,  # lower for better R-peak recall
             rpeak_bpm_bounds=(30.0, 240.0),
             rpeak_min_refrac_ms=120.0,
-            version="v1.1-human-qtdb",
+            version="v1.2-human-qtdb",
         )
 
 #
