@@ -1,8 +1,43 @@
 import numpy as np
 import pyhearts as ph
-from scipy.signal import find_peaks
+from scipy.signal import find_peaks, butter, filtfilt, iirnotch
 from typing import Optional, Union
 from pyhearts.config import ProcessCycleConfig
+
+
+def _bandpass_filter(
+    ecg: np.ndarray,
+    sampling_rate: float,
+    highpass_hz: float,
+    lowpass_hz: float,
+    order: int = 2,
+    notch_hz: Optional[float] = None,
+) -> np.ndarray:
+    """Apply bandpass (and optional notch) filter for R-peak detection."""
+    filtered = ecg.copy()
+    
+    # Highpass to remove baseline wander
+    if highpass_hz > 0:
+        nyq = sampling_rate / 2
+        # Ensure cutoff is valid
+        hp_norm = min(highpass_hz / nyq, 0.99)
+        b, a = butter(order, hp_norm, btype='high')
+        filtered = filtfilt(b, a, filtered)
+    
+    # Lowpass to remove high-frequency noise
+    if lowpass_hz > 0:
+        nyq = sampling_rate / 2
+        lp_norm = min(lowpass_hz / nyq, 0.99)
+        b, a = butter(order, lp_norm, btype='low')
+        filtered = filtfilt(b, a, filtered)
+    
+    # Optional notch filter for power line interference
+    if notch_hz is not None and notch_hz > 0:
+        q = 30.0  # Quality factor
+        b, a = iirnotch(notch_hz, q, sampling_rate)
+        filtered = filtfilt(b, a, filtered)
+    
+    return filtered
 
 
 def r_peak_detection(
@@ -17,6 +52,8 @@ def r_peak_detection(
 ) -> np.ndarray:
     """
     Two-pass, prominence-based R-peak detection driven by config.
+    
+    Optionally applies bandpass filtering (cfg.rpeak_preprocess) for noise robustness.
     First-pass uses a fixed refractory (cfg.rpeak_min_refrac_ms) to estimate RR.
     Second-pass uses cfg.rpeak_rr_frac_second_pass * median(RR) as refractory.
     RR estimate is clamped using cfg.rpeak_bpm_bounds.
@@ -27,10 +64,23 @@ def r_peak_detection(
     if sampling_rate <= 0:
         raise ValueError("`sampling_rate` must be > 0.")
 
+    # ----- Optional preprocessing for noise robustness -----
+    if cfg.rpeak_preprocess:
+        ecg_filtered = _bandpass_filter(
+            ecg,
+            sampling_rate,
+            highpass_hz=cfg.rpeak_highpass_hz,
+            lowpass_hz=cfg.rpeak_lowpass_hz,
+            order=cfg.rpeak_filter_order,
+            notch_hz=cfg.rpeak_notch_hz,
+        )
+    else:
+        ecg_filtered = ecg
+
     # ----- First pass -----
     distance_lo = max(1, int(round(cfg.rpeak_min_refrac_ms * sampling_rate / 1000.0)))
-    prominence_threshold = cfg.rpeak_prominence_multiplier * float(np.std(ecg))
-    peaks_lo, _ = find_peaks(ecg, distance=distance_lo, prominence=prominence_threshold)
+    prominence_threshold = cfg.rpeak_prominence_multiplier * float(np.std(ecg_filtered))
+    peaks_lo, _ = find_peaks(ecg_filtered, distance=distance_lo, prominence=prominence_threshold)
 
     # ----- RR estimation and second pass -----
     if peaks_lo.size < 3:
@@ -45,7 +95,7 @@ def r_peak_detection(
 
         distance = max(1, int(round(cfg.rpeak_rr_frac_second_pass * rr_samp)))
         initial_r_peaks, _ = find_peaks(
-            ecg, distance=distance, prominence=prominence_threshold
+            ecg_filtered, distance=distance, prominence=prominence_threshold
         )
 
     final_filtered_r_peaks = np.asarray(initial_r_peaks, dtype=int)

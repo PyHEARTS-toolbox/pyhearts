@@ -16,6 +16,13 @@ class ProcessCycleConfig:
     rpeak_min_refrac_ms: float = 100.0                # first-pass refractory
     rpeak_rr_frac_second_pass: float = 0.55           # second-pass refractory = k * median RR
     rpeak_bpm_bounds: Tuple[float, float] = (40.0, 900.0)  # clamp for RR estimate
+    
+    # ---- R-peak preprocessing (bandpass filter for noise robustness) ----
+    rpeak_preprocess: bool = True                     # enable filtering before peak detection
+    rpeak_highpass_hz: float = 0.5                    # highpass cutoff (removes baseline wander)
+    rpeak_lowpass_hz: float = 40.0                    # lowpass cutoff (removes HF noise/EMG)
+    rpeak_filter_order: int = 2                       # Butterworth filter order
+    rpeak_notch_hz: Optional[float] = None            # power line notch (50/60 Hz), None=disabled
 
     # ----- Epoching thresholds (used in epoch_ecg) -----
     epoch_corr_thresh: float = 0.80      # min correlation to keep an epoch (0–1)
