@@ -100,33 +100,60 @@ def gaussian_function(
 
 
 def skewed_gaussian_function(xs, *features):
-    """Skewed gaussian fitting function.
-    ***This function is borrowed from https://github.com/fooof-tools/fooof/commit/cfa8a2bec08dab742e9556f4aeee1698415d40ba***
+    """
+    Compute the sum of one or more skewed Gaussian functions.
+    
+    Uses a skew-normal distribution parameterization where:
+    - alpha = 0 gives a symmetric Gaussian
+    - alpha > 0 gives right-skewed (longer tail on right)
+    - alpha < 0 gives left-skewed (longer tail on left)
+    
     Parameters
     ----------
     xs : 1d array
         Input x-axis values.
     *features : float
-        featureeters that define the skewed gaussian function (center, height, width, alpha).
+        Sequence of skewed Gaussian parameters in groups of four:
+        (center, height, width, alpha).
+        Multiple peaks can be specified by providing multiple quadruples.
+        
     Returns
     -------
     ys : 1d array
-        Output values for skewed gaussian function.
+        Output values for sum of skewed Gaussian functions.
+        
+    Notes
+    -----
+    The skew-normal PDF is: f(x) = 2 * phi(x) * Phi(alpha * x)
+    where phi is the standard normal PDF and Phi is the standard normal CDF.
+    We scale by height and shift/scale by center and width.
     """
-
-    ys = np.zeros_like(xs)
+    xs = np.asarray(xs, dtype=float)
+    ys = np.zeros_like(xs, dtype=float)
+    min_width = 1e-10  # avoid division by zero
+    
     for ii in range(0, len(features), 4):
         ctr, hgt, wid, alpha = features[ii : ii + 4]
-        # Gaussian distribution
-        ys = ys + gaussian_function(
-            xs, ctr, hgt, wid
-        )  # SUM of gaussians because we are fitting many at once
-        # Skewed cumulative distribution function
-        cdf = norm.cdf(alpha * ((xs - ctr) / wid))
-        # Skew the gaussian
-        ys = ys * cdf
-        # Rescale height
-        ys = (ys / np.max(ys)) * hgt
+        wid = max(wid, min_width)
+        
+        # Standardized variable
+        z = (xs - ctr) / wid
+        
+        # Standard Gaussian component (unnormalized)
+        gaussian_part = np.exp(-0.5 * z**2)
+        
+        # Skew component: CDF of standard normal at alpha * z
+        skew_part = norm.cdf(alpha * z)
+        
+        # Combined skew-normal (factor of 2 for proper normalization)
+        skew_gaussian = 2.0 * gaussian_part * skew_part
+        
+        # Scale to desired height (normalize peak to 1, then multiply by height)
+        if np.max(skew_gaussian) > 0:
+            skew_gaussian = (skew_gaussian / np.max(skew_gaussian)) * hgt
+        
+        ys += skew_gaussian
+    
     return ys
 
 

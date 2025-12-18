@@ -81,3 +81,55 @@ def calc_bounds(
 
     return [center_lower, lower_height, lower_std], [center_upper, upper_height, upper_std]
 
+
+def calc_bounds_skewed(
+    center: int,
+    height: float,
+    std: int,
+    alpha: float,
+    bound_factor: float,
+    skew_bounds: Tuple[float, float] = (-3.0, 3.0),
+    flip_height: bool = False
+) -> Tuple[List[Union[int, float]], List[Union[int, float]]]:
+    """
+    Calculate bounds for a skewed Gaussian component: center, height, std, and alpha (skew).
+    
+    Parameters
+    ----------
+    center : int
+        Center position of the Gaussian.
+    height : float
+        Amplitude of the Gaussian peak.
+    std : int
+        Standard deviation of the Gaussian.
+    alpha : float
+        Skew parameter (0 = symmetric, >0 = right-skewed, <0 = left-skewed).
+    bound_factor : float
+        Proportion to scale bounds around each feature.
+    skew_bounds : Tuple[float, float]
+        Min and max allowed values for alpha (default (-3.0, 3.0)).
+    flip_height : bool
+        If True, reverses direction of height bounds.
+        
+    Returns
+    -------
+    Tuple[List, List]
+        Lower and upper bounds as [center, height, std, alpha].
+    """
+    # Get standard Gaussian bounds
+    lower_3, upper_3 = calc_bounds(center, height, std, bound_factor, flip_height)
+    
+    # Add alpha bounds
+    alpha_lo, alpha_hi = skew_bounds
+    
+    # Allow alpha to vary within bounds, centered on initial guess
+    alpha_range = (alpha_hi - alpha_lo) * bound_factor
+    lower_alpha = max(alpha - alpha_range, alpha_lo)
+    upper_alpha = min(alpha + alpha_range, alpha_hi)
+    
+    # Ensure lower < upper
+    if lower_alpha >= upper_alpha:
+        lower_alpha = alpha_lo
+        upper_alpha = alpha_hi
+    
+    return lower_3 + [lower_alpha], upper_3 + [upper_alpha]

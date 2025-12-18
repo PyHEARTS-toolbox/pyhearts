@@ -71,6 +71,10 @@ class ProcessCycleConfig:
     detrend_window_ms: int = 150         # baseline detrend window (ms)
     postQRS_refractory_window_ms: int = 20    # small fixed refractory after QRS to avoid S tail (~20 ms in humans)
     
+    # ----- Skewed Gaussian fitting -----
+    use_skewed_gaussian: bool = False    # use skewed (asymmetric) Gaussian for P/T waves
+    skew_bounds: Tuple[float, float] = (-3.0, 3.0)  # alpha bounds for skew parameter
+    
     # ----- Physiological interval limits (RR/PP) -----
     # Defaults span human brady to mouse tachy; presets will narrow these.
     rr_bounds_ms: Tuple[int, int] = (60, 1800)          # 1000–33 bpm

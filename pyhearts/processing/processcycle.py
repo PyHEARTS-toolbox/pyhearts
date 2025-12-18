@@ -11,9 +11,9 @@ from pyhearts.config import ProcessCycleConfig
 from pyhearts.feature import calc_intervals, interval_ms, extract_shape_features
 from pyhearts.fitmetrics import calc_r_squared, calc_rmse
 from pyhearts.plots import plot_fit, plot_labeled_peaks, plot_rise_decay
-from .bounds import calc_bounds
+from .bounds import calc_bounds, calc_bounds_skewed
 from .detrend import detrend_signal
-from .gaussian import compute_gauss_std, gaussian_function
+from .gaussian import compute_gauss_std, gaussian_function, skewed_gaussian_function
 from .peaks import find_peaks
 from .validation import validate_peaks
 from .waveletoffset import calc_wavelet_dynamic_offset
@@ -75,6 +75,10 @@ def process_cycle(
         bound_factor = cfg.bound_factor 
         peak_labels = list(previous_gauss_features.keys())
         feature_list = [previous_gauss_features[label] for label in peak_labels]
+        
+        # Determine if using skewed Gaussian
+        use_skewed = cfg.use_skewed_gaussian
+        params_per_peak = 4 if use_skewed else 3
 
         if len(feature_list) == 0:
             if verbose:
@@ -92,21 +96,47 @@ def process_cycle(
                 plot=plot,
             )
 
-        bounds = [calc_bounds(center, height, std, bound_factor) for center, height, std in feature_list]
-        lower_bounds, upper_bounds = zip(*bounds)
+        # Build bounds based on symmetric vs skewed
+        if use_skewed:
+            bounds_list = []
+            for feat in feature_list:
+                if len(feat) == 4:
+                    center, height, std, alpha = feat
+                else:
+                    center, height, std = feat
+                    alpha = 0.0  # default symmetric
+                bounds_list.append(calc_bounds_skewed(center, height, std, alpha, bound_factor, cfg.skew_bounds))
+        else:
+            bounds_list = [calc_bounds(center, height, std, bound_factor) for center, height, std in feature_list]
+        
+        lower_bounds, upper_bounds = zip(*bounds_list)
         bounds = (np.array(lower_bounds).flatten(), np.array(upper_bounds).flatten())
 
         if verbose:
-            print(f"[Cycle {cycle_idx}]: Running Curve Fit with {len(feature_list)} peaks")
+            print(f"[Cycle {cycle_idx}]: Running Curve Fit with {len(feature_list)} peaks ({'skewed' if use_skewed else 'symmetric'})")
 
+        # Build guess array
+        if use_skewed:
+            guess_list = []
+            for feat in feature_list:
+                if len(feat) == 4:
+                    guess_list.extend(feat)
+                else:
+                    guess_list.extend(list(feat) + [0.0])  # add alpha=0
+            guess = np.array(guess_list)
+        else:
+            guess = np.array(feature_list).flatten()
+        
         # Clamp guess within bounds
         epsilon = 1e-8  # small number to avoid edge
-        guess = np.array(feature_list).flatten()
         guess = np.clip(guess, bounds[0] + epsilon, bounds[1] - epsilon)
+
+        # Select fitting function
+        fit_func = skewed_gaussian_function if use_skewed else gaussian_function
 
         try:
             gaussian_features_fit, _ = curve_fit(
-                gaussian_function, xs_rel_idxs, sig_detrended, p0=guess, bounds=bounds, method="trf", maxfev=cfg.maxfev
+                fit_func, xs_rel_idxs, sig_detrended, p0=guess, bounds=bounds, method="trf", maxfev=cfg.maxfev
             )
             fitting_success = True
             if verbose:
@@ -114,19 +144,31 @@ def process_cycle(
         except (ValueError, RuntimeError) as e:
             if verbose:
                 print(f"[Cycle {cycle_idx}]: Error -  Gaussian fitting failed: {e}")
-            gaussian_features_fit = np.full((len(feature_list) * 3,), np.nan)
+            gaussian_features_fit = np.full((len(feature_list) * params_per_peak,), np.nan)
             fitting_success = False
 
         if fitting_success:
-            new_gaussian_features_reshape = gaussian_features_fit.reshape(-1, 3)
-            new_gauss_center_idxs, new_gauss_heights, new_gauss_stdevs = new_gaussian_features_reshape.T
-
-            previous_gauss_features = {
-                comp: [center, height, std]
-                for comp, center, height, std in zip(
-                    peak_labels, new_gauss_center_idxs, new_gauss_heights, new_gauss_stdevs
-                )
-            }
+            new_gaussian_features_reshape = gaussian_features_fit.reshape(-1, params_per_peak)
+            if use_skewed:
+                new_gauss_center_idxs = new_gaussian_features_reshape[:, 0]
+                new_gauss_heights = new_gaussian_features_reshape[:, 1]
+                new_gauss_stdevs = new_gaussian_features_reshape[:, 2]
+                new_gauss_alphas = new_gaussian_features_reshape[:, 3]
+                previous_gauss_features = {
+                    comp: [center, height, std, alpha]
+                    for comp, center, height, std, alpha in zip(
+                        peak_labels, new_gauss_center_idxs, new_gauss_heights, new_gauss_stdevs, new_gauss_alphas
+                    )
+                }
+            else:
+                new_gauss_center_idxs, new_gauss_heights, new_gauss_stdevs = new_gaussian_features_reshape.T
+                new_gauss_alphas = None
+                previous_gauss_features = {
+                    comp: [center, height, std]
+                    for comp, center, height, std in zip(
+                        peak_labels, new_gauss_center_idxs, new_gauss_heights, new_gauss_stdevs
+                    )
+                }
             if verbose:
                 print(f"[Cycle {cycle_idx}]: Updated previous_gauss_features: {list(previous_gauss_features.keys())}")
             gaussian_features_to_use = gaussian_features_fit
@@ -135,15 +177,16 @@ def process_cycle(
             new_gauss_center_idxs = np.array([])
             new_gauss_heights = np.array([])
             new_gauss_stdevs = np.array([])
+            new_gauss_alphas = None
  
-            gaussian_features_to_use = np.full((len(feature_list) * 3,), np.nan)
+            gaussian_features_to_use = np.full((len(feature_list) * params_per_peak,), np.nan)
 
         if isinstance(gaussian_features_to_use, np.ndarray) and gaussian_features_to_use.ndim == 3:
             gaussian_features_to_use = gaussian_features_to_use.flatten()
 
         if verbose:
             print(f"[Cycle {cycle_idx}]: Generating fitted signal...")
-        fit = gaussian_function(xs_rel_idxs, *gaussian_features_to_use)
+        fit = fit_func(xs_rel_idxs, *gaussian_features_to_use)
         
         # if plot:
         #     plot_fit(xs_rel_idxs, sig_detrended, fit)
@@ -487,6 +530,10 @@ def process_cycle(
 
         # Estimate standard deviations
         std_dict = compute_gauss_std(sig_detrended, guess_idxs)
+        
+        # Determine if using skewed Gaussian
+        use_skewed = cfg.use_skewed_gaussian
+        params_per_peak = 4 if use_skewed else 3
 
         guess_dict = {}
         for comp, (center, height) in guess_idxs.items():
@@ -499,7 +546,11 @@ def process_cycle(
                 if verbose:
                     print(f"[Cycle {cycle_idx}]: Using {comp} std guess: {std_guess:.2f} samples (no clamping)")
         
-                guess_dict[comp] = [int(round(center)), float(height), std_guess]
+                if use_skewed:
+                    # Add alpha=0.0 as initial guess (symmetric)
+                    guess_dict[comp] = [int(round(center)), float(height), std_guess, 0.0]
+                else:
+                    guess_dict[comp] = [int(round(center)), float(height), std_guess]
             else:
                 if verbose:
                     print(f"[Cycle {cycle_idx}]: Skipping {comp}. No std estimate available.")
@@ -510,7 +561,7 @@ def process_cycle(
         guess = np.array(guess_list)
 
         if verbose:
-            print(f"[Cycle {cycle_idx}]: Initial Gaussian guess shape: {guess.shape}")
+            print(f"[Cycle {cycle_idx}]: Initial Gaussian guess shape: {guess.shape} ({'skewed' if use_skewed else 'symmetric'})")
             print(f"[Cycle {cycle_idx}]: Components in guess_dict: {list(guess_dict.keys())}")
 
         # Determine valid components (keys)
@@ -525,7 +576,7 @@ def process_cycle(
         if not valid_guess_list:
             if verbose:
                 print(f"[Cycle {cycle_idx}]: No valid guesses found for curve_fit.")
-            valid_guess = np.empty((0, 3))
+            valid_guess = np.empty((0, params_per_peak))
             fitting_success = False
         else:
             valid_guess = np.array(valid_guess_list)
@@ -536,13 +587,22 @@ def process_cycle(
             if verbose:
                 print(f"[Cycle {cycle_idx}]: Calculating bounds for Gaussian components...")
 
-            bound_factor = cfg.bound_factor 
-            valid_gaus_bounds = [calc_bounds(center, height, std, bound_factor) for center, height, std in valid_guess]
+            bound_factor = cfg.bound_factor
+            if use_skewed:
+                valid_gaus_bounds = [
+                    calc_bounds_skewed(center, height, std, alpha, bound_factor, cfg.skew_bounds)
+                    for center, height, std, alpha in valid_guess
+                ]
+            else:
+                valid_gaus_bounds = [calc_bounds(center, height, std, bound_factor) for center, height, std in valid_guess]
             lower_bounds, upper_bounds = zip(*valid_gaus_bounds)
             bounds = (np.array(lower_bounds).flatten(), np.array(upper_bounds).flatten())
 
             if verbose:
                 print(f"[Cycle {cycle_idx}]: Bounds computed")
+
+            # Select fitting function
+            fit_func = skewed_gaussian_function if use_skewed else gaussian_function
 
             # Perform curve fitting
             p0 = valid_guess.flatten()
@@ -551,7 +611,7 @@ def process_cycle(
                 print(f"[Cycle {cycle_idx}]: Preparing to run curve_fit...")
             try:
                 gaussian_features_fit, _ = curve_fit(
-                    gaussian_function,
+                    fit_func,
                     xs_rel_idxs,
                     sig_detrended,
                     p0=p0,
@@ -572,15 +632,27 @@ def process_cycle(
         # Post-Fit: Handle fitted  features
         # --------------------------------------------
         if fitting_success:
-            gaussian_features_reshape = gaussian_features_fit.reshape(-1, 3)
-            gauss_center_idxs, gauss_heights, gauss_stdevs = gaussian_features_reshape.T
-        
-            previous_gauss_features = {
-                comp: [center, height, std]
-                for comp, center, height, std in zip(
-                    valid_components, gauss_center_idxs, gauss_heights, gauss_stdevs
-                )
-            }
+            gaussian_features_reshape = gaussian_features_fit.reshape(-1, params_per_peak)
+            if use_skewed:
+                gauss_center_idxs = gaussian_features_reshape[:, 0]
+                gauss_heights = gaussian_features_reshape[:, 1]
+                gauss_stdevs = gaussian_features_reshape[:, 2]
+                gauss_alphas = gaussian_features_reshape[:, 3]
+                previous_gauss_features = {
+                    comp: [center, height, std, alpha]
+                    for comp, center, height, std, alpha in zip(
+                        valid_components, gauss_center_idxs, gauss_heights, gauss_stdevs, gauss_alphas
+                    )
+                }
+            else:
+                gauss_center_idxs, gauss_heights, gauss_stdevs = gaussian_features_reshape.T
+                gauss_alphas = None
+                previous_gauss_features = {
+                    comp: [center, height, std]
+                    for comp, center, height, std in zip(
+                        valid_components, gauss_center_idxs, gauss_heights, gauss_stdevs
+                    )
+                }
             if verbose:
                 print(f"[Cycle {cycle_idx}]: Updated 'previous_gauss_features': {list(previous_gauss_features.keys())}")
             gaussian_features_to_use = gaussian_features_fit
@@ -590,6 +662,7 @@ def process_cycle(
             gauss_center_idxs = np.array([])
             gauss_heights = np.array([])
             gauss_stdevs = np.array([])
+            gauss_alphas = None
             gaussian_features_to_use = np.full((len(p0),), np.nan)
 
         # Ensure flat array for use in Gaussian function
@@ -598,7 +671,7 @@ def process_cycle(
 
         if verbose:
             print(f"[Cycle {cycle_idx}]: Generating fitted signal...")
-        fit = gaussian_function(xs_rel_idxs, *gaussian_features_to_use)
+        fit = fit_func(xs_rel_idxs, *gaussian_features_to_use)
        
         if plot:
             plot_fit(xs_rel_idxs, sig_detrended, fit)
