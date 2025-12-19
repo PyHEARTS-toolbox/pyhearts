@@ -122,3 +122,40 @@ benchmark/test_data_full/
 # Keep benchmark results for tracking
 !benchmark/results/*.csv
 
+# Analysis and results directories (non-toolbox files)
+qtdb_inverted-sig_subjects_analysis/
+**/pyhearts_results*/
+**/pyhearts_results_new/
+
+# Plot images (generated files)
+*.png
+*.jpg
+*.jpeg
+*.gif
+!docs/**/*.png
+!docs/**/*.jpg
+
+# Analysis output files
+*_comparison*.csv
+*_comparison*.png
+*_stats.png
+*_visualization.png
+*_rpeak*.csv
+*_rpeak*.png
+analysis_log.txt
+analysis_summary.csv
+selected_leads.csv
+*_hrv_metrics.csv
+*_meta.json
+*_pyhearts.csv
+
+# Build artifacts
+pyhearts.egg-info/
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+

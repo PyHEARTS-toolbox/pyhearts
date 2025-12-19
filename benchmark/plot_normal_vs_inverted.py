@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+git #!/usr/bin/env python3
 """
 Generate comparison plot showing:
 1. Inverted signal with PyHEARTS detected peaks
