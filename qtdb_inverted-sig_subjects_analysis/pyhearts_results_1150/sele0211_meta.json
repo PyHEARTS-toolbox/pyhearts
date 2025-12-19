@@ -1,0 +1,105 @@
+{
+  "code_sha256": "90ab05d9051c86e2a28b9c65944a0dd9496fd4037137cf7e82e2493c5ca854f5",
+  "config": {
+    "amp_min_ratio": {
+      "P": 0.025,
+      "Q": 0.015,
+      "S": 0.015,
+      "T": 0.04
+    },
+    "bound_factor": 0.2,
+    "detrend_window_ms": 200,
+    "duration_min_ms": 20,
+    "epoch_corr_thresh": 0.68,
+    "epoch_var_thresh": 6.5,
+    "maxfev": 2500,
+    "postQRS_refractory_window_ms": 20,
+    "pp_bounds_ms": null,
+    "pre_r_window": null,
+    "rpeak_bpm_bounds": [
+      30.0,
+      240.0
+    ],
+    "rpeak_filter_order": 2,
+    "rpeak_highpass_hz": 0.5,
+    "rpeak_lowpass_hz": 40.0,
+    "rpeak_min_refrac_ms": 120.0,
+    "rpeak_notch_hz": null,
+    "rpeak_preprocess": true,
+    "rpeak_prominence_multiplier": 2.25,
+    "rpeak_rr_frac_second_pass": 0.5,
+    "rr_bounds_ms": [
+      300,
+      1800
+    ],
+    "savgol_polyorder": 3,
+    "savgol_window_pts": 7,
+    "shape_diff_mode": "signed",
+    "shape_interdeflection_pairs": [
+      [
+        "R",
+        "S"
+      ],
+      [
+        "R",
+        "P"
+      ],
+      [
+        "T",
+        "R"
+      ]
+    ],
+    "shape_max_window_ms": {
+      "P": 160,
+      "Q": 60,
+      "R": 80,
+      "S": 60,
+      "T": 220
+    },
+    "shape_search_scale": 2.0,
+    "sharp_amp_norm": "p2p",
+    "sharp_stat": "p95",
+    "skew_bounds": [
+      -3.0,
+      3.0
+    ],
+    "snr_apply_savgol": {
+      "P": false,
+      "T": true
+    },
+    "snr_exclusion_ms": {
+      "P": 0,
+      "T": 10
+    },
+    "snr_mad_multiplier": {
+      "P": 1.6,
+      "T": 1.6
+    },
+    "threshold_fraction": 0.18,
+    "use_skewed_gaussian": false,
+    "version": "v1.2-human-qtdb",
+    "wavelet_base_offset_ms": 1,
+    "wavelet_detail_level": 3,
+    "wavelet_guard_cap_ms": 100,
+    "wavelet_k_multiplier": 1.75,
+    "wavelet_max_offset_ms": 60,
+    "wavelet_name": "db6",
+    "wavelet_peak_height_sigma": 1.2
+  },
+  "config_sha256": "9e22a06337ac419bccc83ed5b301402ce6db22d3194ebdcacd3633af8ff77e33",
+  "git": {
+    "branch": "main",
+    "commit": "4ad23f20822db75d2206f1525ed93b03e1c9b4a2",
+    "status_clean": false
+  },
+  "plot": false,
+  "pyhearts_version": "v1.2-human-qtdb",
+  "runtime": {
+    "numpy": "2.0.2",
+    "pandas": "2.3.3",
+    "platform": "macOS-26.2-arm64-arm-64bit",
+    "python": "3.9.6"
+  },
+  "sampling_rate_hz": 250,
+  "verbose": false
+}

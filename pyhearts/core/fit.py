@@ -288,6 +288,7 @@ class PyHEARTS:
         ecg_signal: np.ndarray,
         verbose: Optional[bool] = None,
         plot: Optional[bool] = None,
+        raw_ecg: Optional[np.ndarray] = None,
     ) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
         Run the full PyHEARTS ECG analysis pipeline.
@@ -302,11 +303,16 @@ class PyHEARTS:
         Parameters
         ----------
         ecg_signal : np.ndarray
-            Raw ECG signal array (in mV).
+            Preprocessed ECG signal array (in mV).
         verbose : bool, optional
             If True, print detailed progress/logging messages.
         plot : bool, optional
             If True, plot intermediate processing results.
+        raw_ecg : np.ndarray, optional
+            Raw (unfiltered) ECG signal for polarity detection. If provided, polarity
+            is detected on the raw signal to avoid issues where preprocessing may
+            change apparent signal polarity. If None, polarity is detected on the
+            filtered signal.
     
         Returns
         -------
@@ -335,6 +341,7 @@ class PyHEARTS:
                 cfg=self.cfg,
                 plot=self.plot,
                 sensitivity=self.sensitivity,
+                raw_ecg=raw_ecg,
             )
             self.r_peak_indices = filtered_r_peaks
         
