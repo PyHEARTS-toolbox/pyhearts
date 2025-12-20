@@ -122,6 +122,9 @@ benchmark/test_data_full/
 # Keep benchmark results for tracking
 !benchmark/results/*.csv
 
+# Worst performing records data and analysis (non-toolbox - data files and diagnostic scripts)
+worst_5_records_raw_data/
+
 # Analysis and results directories (non-toolbox files)
 qtdb_inverted-sig_subjects_analysis/
 qtdb_subjects_analysis/

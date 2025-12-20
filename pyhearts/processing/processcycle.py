@@ -217,7 +217,10 @@ def process_cycle(
             s = float(stdevs_arr[i]) if (stdevs_arr is not None and i < stdevs_arr.size) else float("nan")
             
             if center_idx is not None and np.isfinite(s) and s > 0:
-                half = max(1, int(round(s * sqrt(2.0 * log(2.0)))))  # half-FWHM in samples
+                # Use half-FWHM as search window, but ensure minimum width for better peak finding
+                half = max(5, int(round(s * sqrt(2.0 * log(2.0)))))  # half-FWHM in samples, min 5
+                # Cap window size to avoid too wide search (max 20 samples each side)
+                half = min(half, 20)
                 left  = max(center_idx - half, 0)
                 right = min(center_idx + half + 1, len(sig_detrended))
                 window = sig_detrended[left:right]
@@ -231,7 +234,7 @@ def process_cycle(
             
                 corrected_center = left + local_ext_idx
                 if corrected_center != center_idx and verbose:
-                    print(f"[Cycle {cycle_idx}]: {comp} center adjusted from {center_idx} to {corrected_center}")
+                    print(f"[Cycle {cycle_idx}]: {comp} center adjusted from {center_idx} to {corrected_center} (window={half*2+1})")
                 center_idx = corrected_center
             else: 
                 if verbose:
@@ -379,8 +382,11 @@ def process_cycle(
         else:
             pre_qrs_len = int(p_peak_end_idx)
         
-            #
-            start_idx = min(pre_qrs_len - 2, int(round(10.0 * sampling_rate / 1000.0)))
+            # Narrow P-wave search window: search in the last 120ms before QRS (reduced from full pre-QRS)
+            # This prevents detecting noise or artifacts far from the QRS complex
+            max_p_window_ms = cfg.shape_max_window_ms.get("P", 120)
+            max_p_window_samples = int(round(max_p_window_ms * sampling_rate / 1000.0))
+            start_idx = max(0, pre_qrs_len - max_p_window_samples)
         
             if pre_qrs_len - start_idx < 2:
                 if verbose:
@@ -697,18 +703,35 @@ def process_cycle(
             center_idx = int(np.round(c_val)) if np.isfinite(c_val) else None
             corrected_center_idx = center_idx
         
-            # refine local extremum within ±10 samples if possible
-            if center_idx is not None and 10 < center_idx < len(sig_detrended) - 10:
-                window = sig_detrended[center_idx - 10 : center_idx + 11]
-                if comp in ("P", "R", "T"):
-                    local_ext_idx = int(np.argmax(window))
-                elif comp in ("Q", "S"):
-                    local_ext_idx = int(np.argmin(window))
+            # refine local extremum within wider window to find true peak
+            # Use adaptive window based on Gaussian std if available, otherwise use fixed window
+            if center_idx is not None:
+                if stdevs_arr is not None and i < stdevs_arr.size:
+                    s = stdevs_arr[i]
+                    if np.isfinite(s) and s > 0:
+                        # Use half-FWHM as search window (more accurate for true peak)
+                        half_fwhm = max(5, int(round(s * np.sqrt(2.0 * np.log(2.0)))))
+                        window_half = min(half_fwhm, 20)  # Cap at 20 samples to avoid too wide
+                    else:
+                        window_half = 15  # Default wider window if std not available
                 else:
-                    local_ext_idx = 10
-                corrected_center_idx = center_idx - 10 + local_ext_idx
-                if corrected_center_idx != center_idx and verbose:
-                    print(f"[Cycle {cycle_idx}]: {comp} center adjusted {center_idx} → {corrected_center_idx}")
+                    window_half = 15  # Default wider window
+                
+                if window_half < center_idx < len(sig_detrended) - window_half:
+                    window = sig_detrended[center_idx - window_half : center_idx + window_half + 1]
+                    if comp in ("P", "R", "T"):
+                        local_ext_idx = int(np.argmax(window))
+                    elif comp in ("Q", "S"):
+                        local_ext_idx = int(np.argmin(window))
+                    else:
+                        local_ext_idx = window_half
+                    corrected_center_idx = center_idx - window_half + local_ext_idx
+                    if corrected_center_idx != center_idx and verbose:
+                        print(f"[Cycle {cycle_idx}]: {comp} center adjusted {center_idx} → {corrected_center_idx} (window={window_half*2+1})")
+                else:
+                    corrected_center_idx = center_idx
+            else:
+                corrected_center_idx = center_idx
         
             # map to global sample index (if available)
             global_center_idx = (

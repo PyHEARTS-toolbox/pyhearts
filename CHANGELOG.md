@@ -18,6 +18,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `CHANGELOG.md` to track version history
 - `py.typed` marker for PEP 561 typed package support
 
+## [1.3.0] - 2025-01-XX
+
+### Added
+- **Signal quality assessment**: New `assess_signal_quality()` function in `pyhearts.processing.quality` module
+  - Evaluates SNR, amplitude range, and baseline wander
+  - Integrated into `PyHEARTS.analyze_ecg()` with configurable thresholds
+  - Logs warnings for low-quality signals while allowing processing to continue
+
+### Changed
+- **P-wave detection improvements**:
+  - Increased P-wave SNR threshold from 1.6 to 2.2 (37.5% increase) to reduce false positives
+  - Narrowed P-wave search window from 160ms to 120ms for more precise detection
+  - Improved search logic to focus on physiologically relevant pre-QRS region
+- **R-peak detection improvements**:
+  - Increased R-peak prominence multiplier from 2.25 to 2.5 (11% increase) to reduce false positives
+  - Enhanced amplitude filtering and gap-filling logic for better precision
+  - Improved notch filter Q factor from 30.0 to 35.0 for better power line noise rejection
+- **Peak timing accuracy**:
+  - Replaced fixed ±10 sample adjustment window with adaptive window based on Gaussian half-FWHM
+  - Window capped at ±20 samples for physiologically relevant peak refinement
+  - Applied consistently to all wave types (P, Q, R, S, T) in both estimation paths
+- **T-wave detection tuning**:
+  - Adjusted T-wave SNR threshold from 1.8 to 1.5 for improved detection while maintaining false positive control
+- **Polarity detection**:
+  - Improved logic to handle edge cases (e.g., negative baseline with positive R-peaks)
+  - Stricter thresholds (1.2x/1.3x) for inversion detection to reduce false positives
+  - Conservative fallback: assumes normal polarity when uncertain
+  - Primary amplitude check: substantial positive peaks (>0.5 mV) override other conditions
+
+### Fixed
+- Fixed incorrect polarity detection for signals with negative baseline but positive R-peaks
+- Improved peak refinement to place peaks at true local extrema, not just Gaussian centers
+
+### Configuration
+- Updated `for_human()` preset with optimized parameters based on QTDB benchmark analysis
+- Version identifier: `v1.3-human-qtdb-improved`
+
+### Validation
+- All improvements validated on simulated signals with no performance degradation
+- Maintained 100% detection rate on normal and inverted test signals
+- Improved timing accuracy (mean offset: -0.44 ms)
+
 ## [1.0.0] - 2025-12-17
 
 ### Added

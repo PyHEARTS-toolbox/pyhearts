@@ -218,29 +218,30 @@ class ProcessCycleConfig:
         """
         Preset tuned for adult human physiology.
         
-        Optimized based on QTDB benchmark (Dec 2024):
-        - Relaxed epoch correlation for morphological variation
-        - Moderate threshold_fraction for accurate wave boundaries
-        - Balanced SNR thresholds to maintain T-wave detection
+        Optimized based on QTDB benchmark (Dec 2024) and diagnostic analysis:
+        - Increased P-wave SNR threshold to reduce false positives
+        - Narrowed P-wave search window for better accuracy
+        - Increased R-peak prominence for better precision
+        - Improved T-wave detection thresholds
         """
         return replace(
             cls(),
             detrend_window_ms=200,
             postQRS_refractory_window_ms=20,    # small fixed refractory after QRS to avoid S tail
             amp_min_ratio={"P": 0.025, "T": 0.04, "Q": 0.015, "S": 0.015},  # lowered for better recall
-            snr_mad_multiplier={"P": 1.6, "T": 1.6},   # balanced: between 1.4 (too low) and 2.0 (too high)
+            snr_mad_multiplier={"P": 2.2, "T": 1.5},   # Increased P from 1.6 to 2.2, T tuned to 1.5 for better detection
             snr_exclusion_ms={"P": 0, "T": 10},
             snr_apply_savgol={"P": False, "T": True},
             rr_bounds_ms=(300, 1800),              # ~200–33 bpm
-            shape_max_window_ms={"P": 160, "Q": 60, "R": 80, "S": 60, "T": 220},  # slightly wider T window
+            shape_max_window_ms={"P": 120, "Q": 60, "R": 80, "S": 60, "T": 220},  # Narrowed P from 160 to 120
             duration_min_ms=20,
             threshold_fraction=0.18,  # moderate: between 0.15 (too low) and 0.30 (too high)
             epoch_corr_thresh=0.68,   # more permissive but not too loose
             epoch_var_thresh=6.5,     # more permissive variance threshold
-            rpeak_prominence_multiplier=2.25,  # lower for better R-peak recall
+            rpeak_prominence_multiplier=2.5,  # Increased from 2.25 to 2.5 to reduce false positives
             rpeak_bpm_bounds=(30.0, 240.0),
             rpeak_min_refrac_ms=120.0,
-            version="v1.2-human-qtdb",
+            version="v1.3-human-qtdb-improved",
         )
 
 #

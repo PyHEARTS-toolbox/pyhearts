@@ -13,7 +13,11 @@ def _bandpass_filter(
     order: int = 2,
     notch_hz: Optional[float] = None,
 ) -> np.ndarray:
-    """Apply bandpass (and optional notch) filter for R-peak detection."""
+    """
+    Apply bandpass (and optional notch) filter for R-peak detection.
+    
+    Enhanced for low-SNR signals with better noise reduction.
+    """
     filtered = ecg.copy()
     
     # Highpass to remove baseline wander
@@ -25,6 +29,7 @@ def _bandpass_filter(
         filtered = filtfilt(b, a, filtered)
     
     # Lowpass to remove high-frequency noise
+    # For low-SNR signals, use slightly lower cutoff to reduce noise
     if lowpass_hz > 0:
         nyq = sampling_rate / 2
         lp_norm = min(lowpass_hz / nyq, 0.99)
@@ -32,8 +37,9 @@ def _bandpass_filter(
         filtered = filtfilt(b, a, filtered)
     
     # Optional notch filter for power line interference
+    # Use higher Q factor for better noise rejection in low-SNR signals
     if notch_hz is not None and notch_hz > 0:
-        q = 30.0  # Quality factor
+        q = 35.0  # Increased from 30.0 for better noise rejection
         b, a = iirnotch(notch_hz, q, sampling_rate)
         filtered = filtfilt(b, a, filtered)
     
@@ -93,13 +99,50 @@ def _detect_signal_polarity(
     
     # If we don't find enough peaks, can't determine polarity reliably
     if pos_peaks.size < 3 and neg_peaks.size < 3:
-        # Fallback: check overall signal bias
-        # If signal is predominantly negative, it's likely inverted
-        signal_median = np.median(ecg)
-        signal_mean = np.mean(ecg)
-        if signal_median < -0.1 or signal_mean < -0.1:
-            return True
-        return False
+        # Fallback: check actual peak values, not just signal bias
+        # Signal bias can be misleading (e.g., baseline wander)
+        # Instead, check if we can find any clear peaks with lower threshold
+        relaxed_threshold = prominence_threshold * 0.6  # More relaxed
+        pos_peaks_relaxed, pos_props_relaxed = find_peaks(
+            ecg, distance=distance_samples, prominence=relaxed_threshold
+        )
+        neg_peaks_relaxed, neg_props_relaxed = find_peaks(
+            -ecg, distance=distance_samples, prominence=relaxed_threshold
+        )
+        
+        if pos_peaks_relaxed.size >= 2 or neg_peaks_relaxed.size >= 2:
+            # Compare peak amplitudes (use actual signal values, not absolute)
+            if pos_peaks_relaxed.size > 0:
+                pos_values = ecg[pos_peaks_relaxed]
+                median_pos_val = np.median(pos_values)
+                max_pos_val = np.max(pos_values)
+            else:
+                median_pos_val = 0
+                max_pos_val = 0
+            
+            if neg_peaks_relaxed.size > 0:
+                neg_values = ecg[neg_peaks_relaxed]  # Already negative
+                median_neg_val = np.median(neg_values)
+                min_neg_val = np.min(neg_values)
+            else:
+                median_neg_val = 0
+                min_neg_val = 0
+            
+            # Check if positive peaks are clearly present and substantial
+            # R-peaks should be the largest deflections
+            if max_pos_val > 0.5 and max_pos_val > abs(min_neg_val) * 0.8:
+                # Positive peaks are substantial - signal is normal
+                return False
+            elif abs(min_neg_val) > 0.5 and abs(min_neg_val) > max_pos_val * 1.2:
+                # Negative peaks are clearly dominant - signal is inverted
+                return True
+            else:
+                # Ambiguous - assume normal (conservative approach)
+                return False
+        else:
+            # Can't determine - assume normal (conservative approach)
+            # This prevents false inversion detection
+            return False
     
     # Compare the magnitude of the most prominent peaks
     # For inverted signals, negative peaks should be more prominent
@@ -126,15 +169,31 @@ def _detect_signal_polarity(
         median_neg_amp = np.median(np.abs(ecg[neg_peaks])) if len(neg_peaks) > 0 else 0
         
         # Signal is inverted if negative peaks are more prominent
-        # Use a more lenient threshold: negative peaks must be at least 1.1x more prominent
-        # OR if negative amplitude is significantly larger (1.15x)
-        # OR if negative prominence is at least equal and negative amplitude is larger
-        # This handles cases where filtering affects prominence but amplitude is clear
-        is_inverted = (
-            (median_neg_prom > 1.1 * median_pos_prom) or 
-            (median_neg_amp > 1.15 * median_pos_amp) or
-            (median_neg_prom >= median_pos_prom and median_neg_amp > median_pos_amp)
-        )
+        # Use stricter thresholds to avoid false positives
+        # Negative peaks must be clearly dominant (1.3x threshold) to be considered inverted
+        # This prevents false inversion detection when signal has slight negative bias
+        # but R-peaks are actually positive
+        
+        # Check actual peak values (not just prominence) - R-peaks should be the largest deflections
+        max_pos_val = np.max(ecg[pos_peaks]) if len(pos_peaks) > 0 else 0
+        min_neg_val = np.min(ecg[neg_peaks]) if len(neg_peaks) > 0 else 0
+        
+        # Primary check: compare actual peak amplitudes
+        # If positive peaks are substantial (>0.5 mV) and comparable to negative peaks,
+        # assume normal polarity (conservative)
+        if max_pos_val > 0.5 and max_pos_val > abs(min_neg_val) * 0.7:
+            is_inverted = False
+        # Only invert if negative peaks are clearly and substantially dominant
+        elif abs(min_neg_val) > 0.5 and abs(min_neg_val) > max_pos_val * 1.3:
+            is_inverted = True
+        # Secondary check: use prominence comparison with strict threshold
+        elif median_neg_prom > 1.3 * median_pos_prom and median_pos_prom > 0:
+            is_inverted = True
+        elif median_neg_amp > 1.4 * median_pos_amp and median_pos_amp > 0:
+            is_inverted = True
+        else:
+            # Default: assume normal (conservative)
+            is_inverted = False
         
         return is_inverted
     elif neg_peaks.size > 0 and pos_peaks.size == 0:
@@ -320,9 +379,10 @@ def r_peak_detection(
         peak_heights = ecg_for_peak_detection[initial_r_peaks]
         max_peak_height = np.max(peak_heights)
         
-        # Keep only peaks that are at least 40% of the max height
+        # Keep only peaks that are at least 50% of the max height (increased from 40%)
         # (R-peaks are typically 2-10x taller than P/T waves)
-        height_threshold = 0.4 * max_peak_height
+        # Higher threshold reduces false positives from P/T waves
+        height_threshold = 0.5 * max_peak_height
         amplitude_mask = peak_heights >= height_threshold
         initial_r_peaks = initial_r_peaks[amplitude_mask]
     
@@ -335,7 +395,7 @@ def r_peak_detection(
         large_gaps = np.where(rr_intervals > gap_threshold)[0]
         
         additional_peaks = []
-        reduced_prominence = prominence_threshold * 0.8  # Less lenient: 0.8 instead of 0.7
+        reduced_prominence = prominence_threshold * 0.85  # Less lenient: 0.85 instead of 0.8
         
         for gap_idx in large_gaps:
             start_idx = initial_r_peaks[gap_idx]
@@ -355,8 +415,9 @@ def r_peak_detection(
             # Only keep peaks that are:
             # 1. Reasonably positioned (not too close to edges)
             # 2. Actually tall enough to be R-peaks (not T-peaks)
+            # Increased height threshold from 0.5 to 0.6 to reduce false positives
             margin = int(0.25 * median_rr_samples)
-            r_peak_height_threshold = np.max(ecg_for_peak_detection[initial_r_peaks]) * 0.5
+            r_peak_height_threshold = np.max(ecg_for_peak_detection[initial_r_peaks]) * 0.6
             
             for gp in gap_peaks:
                 global_idx = start_idx + gp

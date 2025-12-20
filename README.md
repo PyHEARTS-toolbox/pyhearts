@@ -29,5 +29,7 @@ PyHEARTS bridges this gap by providing a transparent and physiologically interpr
 - **Reconstruction fidelity**: Over 75% of cycles exceed R² > 0.9.
 - **High reproducibility**: Median feature ICC > 0.95 across sessions and datasets.
 - **Transparent and configurable**: Every run saves full parameter configuration and analysis metadata.
+- **Signal quality assessment**: Automatic quality checks (SNR, amplitude, baseline wander) with configurable thresholds.
+- **Robust peak detection**: Improved P, R, and T wave detection with reduced false positives and enhanced timing accuracy.
 
 ---

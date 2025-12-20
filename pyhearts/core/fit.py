@@ -335,6 +335,27 @@ class PyHEARTS:
         self.hrv_metrics = {}
 
         try:
+            # Check signal quality before processing
+            from pyhearts.processing.quality import assess_signal_quality
+            
+            is_acceptable, quality_metrics, quality_reason = assess_signal_quality(
+                ecg_signal,
+                self.sampling_rate,
+                min_snr_db=15.0,  # Minimum 15 dB SNR
+                min_amplitude_range_mv=0.3,  # Minimum 0.3 mV peak-to-peak
+                max_baseline_wander_mv=0.3,  # Maximum 0.3 mV baseline wander
+            )
+            
+            if not is_acceptable:
+                if self.verbose:
+                    logging.warning(
+                        f"Signal quality check failed: {quality_reason}. "
+                        f"Metrics: SNR={quality_metrics.get('snr_db', 'N/A'):.1f} dB, "
+                        f"Amplitude={quality_metrics.get('amplitude_range_mv', 'N/A'):.3f} mV"
+                    )
+                # Continue anyway but log the warning
+                # (Don't fail completely - let user decide)
+            
             filtered_r_peaks = r_peak_detection(
                 ecg_signal, 
                 self.sampling_rate, 
