@@ -15,7 +15,12 @@ from .bounds import calc_bounds, calc_bounds_skewed
 from .detrend import detrend_signal
 from .gaussian import compute_gauss_std, gaussian_function, skewed_gaussian_function
 from .peaks import find_peaks
-from .validation import validate_peaks
+from .validation import (
+    validate_peaks,
+    validate_cycle_physiology,
+    validate_peak_temporal_order,
+    validate_intervals_physiological,
+)
 from .waveletoffset import calc_wavelet_dynamic_offset
 from .snrgate import gate_by_local_mad
 
@@ -88,12 +93,12 @@ def process_cycle(
                 output_dict,
                 sampling_rate,
                 cycle_idx,
-                filtered_r_peaks,
                 previous_r_global_center_idx,
                 previous_p_global_center_idx,
                 None,
                 verbose=verbose,
                 plot=plot,
+                cfg=cfg,
             )
 
         # Build bounds based on symmetric vs skewed
@@ -1081,6 +1086,60 @@ def process_cycle(
     output_dict["RR_interval_ms"][cycle_idx] = rr_val_ms
     output_dict["PP_interval_ms"][cycle_idx] = pp_val_ms
 
+    # ==============================================================================
+    # PHYSIOLOGICAL VALIDATION
+    # ==============================================================================
+    # Combine all interval results for validation
+    all_interval_results = {**interval_results, "RR_interval_ms": rr_val_ms, "PP_interval_ms": pp_val_ms}
+    
+    # Validate peak temporal ordering and intervals
+    is_valid, validation_errors = validate_cycle_physiology(
+        peak_data=peak_data,
+        interval_results=all_interval_results,
+        sampling_rate=sampling_rate,
+        verbose=verbose,
+        cycle_idx=cycle_idx,
+    )
+    
+    if not is_valid:
+        if verbose:
+            print(f"[Cycle {cycle_idx}]: ⚠️  Physiological validation FAILED - invalidating problematic values")
+        
+        # If peak ordering is violated, invalidate the problematic peaks
+        if validation_errors.get('peak_ordering'):
+            if verbose:
+                print(f"[Cycle {cycle_idx}]: Invalidating peaks due to ordering violations")
+            # Invalidate all peaks except R (R is critical and should be preserved if detected)
+            # This is a conservative approach - if ordering is wrong, we can't trust the other peaks
+            problematic_components = ["P", "Q", "S", "T"]
+            for comp in problematic_components:
+                if comp in peak_data:
+                    # Set center indices and related values to NaN in output_dict
+                    for key_suffix in ["_global_center_idx", "_global_le_idx", "_global_ri_idx", 
+                                       "_center_voltage", "_le_voltage", "_ri_voltage"]:
+                        key = f"{comp}{key_suffix}"
+                        if key in output_dict:
+                            if verbose:
+                                print(f"[Cycle {cycle_idx}]: Setting {key} to NaN due to ordering violation")
+                            output_dict[key][cycle_idx] = np.nan
+        
+        # If intervals are out of physiological range, set them to NaN
+        if validation_errors.get('intervals'):
+            for error_msg in validation_errors['intervals']:
+                # Extract interval name from error message
+                # Format: "PR_interval_ms = 600.00 ms is outside physiological range [50, 500] ms"
+                if '_ms' in error_msg:
+                    interval_name = error_msg.split('_ms')[0] + '_ms'
+                    if interval_name in output_dict:
+                        if verbose:
+                            print(f"[Cycle {cycle_idx}]: Setting {interval_name} to NaN due to physiological violation")
+                        output_dict[interval_name][cycle_idx] = np.nan
+        
+        # Log summary
+        if verbose:
+            total_errors = len(validation_errors.get('peak_ordering', [])) + len(validation_errors.get('intervals', []))
+            print(f"[Cycle {cycle_idx}]: Total validation errors: {total_errors}")
+    
     # Update prevs for next cycle
     previous_r_global_center_idx = r_global_center_idx
     previous_p_global_center_idx = p_global_center_idx

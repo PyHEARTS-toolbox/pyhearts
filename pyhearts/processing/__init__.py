@@ -10,7 +10,13 @@ from .preprocess import preprocess_ecg
 from .processcycle import process_cycle
 from .rpeak import r_peak_detection
 from .snrgate import gate_by_local_mad
-from .validation import log_peak_result, validate_peaks
+from .validation import (
+    log_peak_result,
+    validate_peaks,
+    validate_peak_temporal_order,
+    validate_intervals_physiological,
+    validate_cycle_physiology,
+)
 from .waveletoffset import calc_wavelet_dynamic_offset
 from .quality import assess_signal_quality
 
@@ -32,4 +38,7 @@ __all__ = [
     "process_cycle",
     "r_peak_detection",
     "validate_peaks",
+    "validate_peak_temporal_order",
+    "validate_intervals_physiological",
+    "validate_cycle_physiology",
 ]

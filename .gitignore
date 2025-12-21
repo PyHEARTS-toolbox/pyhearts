@@ -132,44 +132,14 @@ qtdb_subjects_analysis/
 **/pyhearts_results_new/
 **/*_analysis/
 
-# Plot images (generated files)
-*.png
-*.jpg
-*.jpeg
-*.gif
-!docs/**/*.png
-!docs/**/*.jpg
-
-# Analysis output files
-*_comparison*.csv
-*_comparison*.png
-*_stats.png
-*_visualization.png
-*_rpeak*.csv
-*_rpeak*.png
-analysis_log.txt
-analysis_summary.csv
-selected_leads.csv
-*_hrv_metrics.csv
-*_meta.json
-*_pyhearts.csv
-
-# Build artifacts
-pyhearts.egg-info/
-*.egg-info/
-
-# Virtual environments
-.venv/
-venv/
-ENV/
-env/
-
-# Analysis and results directories (non-toolbox files)
-qtdb_inverted-sig_subjects_analysis/
-qtdb_subjects_analysis/
-**/pyhearts_results*/
-**/pyhearts_results_new/
-**/*_analysis/
+# Development/analysis documentation (non-toolbox - keep README.md, CHANGELOG.md, LICENSE.md)
+IMPROVEMENTS_SUMMARY.md
+PHYSIOLOGICAL_VALIDATION.md
+POLARITY_AND_QUALITY_FIXES.md
+TWAVE_TUNING_COMPLETE.md
+*_SUMMARY.md
+*_COMPLETE.md
+*_FIXES.md
 
 # Plot images (generated files)
 *.png
@@ -196,10 +166,4 @@ selected_leads.csv
 # Build artifacts
 pyhearts.egg-info/
 *.egg-info/
-
-# Virtual environments
-.venv/
-venv/
-ENV/
-env/
 
