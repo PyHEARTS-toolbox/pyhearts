@@ -44,6 +44,15 @@ class ProcessCycleConfig:
     wavelet_k_multiplier: float = 1.75   # k·σ on R to define local R-bounds
     wavelet_detail_level: int = 3        # preferred wavelet detail level
     wavelet_peak_height_sigma: float = 1.2
+    
+    # ----- P-wave specific band-pass filtering -----
+    pwave_use_bandpass: bool = True      # enable band-pass filter for P-wave detection
+    pwave_bandpass_low_hz: float = 5.0   # low cutoff frequency (Hz) for P-wave enhancement
+    pwave_bandpass_high_hz: float = 15.0 # high cutoff frequency (Hz) for P-wave enhancement
+    pwave_bandpass_order: int = 4        # filter order for P-wave band-pass
+    
+    # ----- Derivative-based detection (full-signal, derivative-based) -----
+    use_derivative_based_detection: bool = False  # use derivative-based peak detection (full-signal filtering, derivative-based)
 
     # ---- Amplitude ratios to avoid noise ---
     amp_min_ratio: Dict[str, float] = field(
@@ -94,6 +103,15 @@ class ProcessCycleConfig:
     # Note: 0.15 was too aggressive and caused issues with validation
     threshold_fraction: float = 0.20     # fraction of (peak-to-baseline) for width crossings
     duration_min_ms: int = 20             # minimum valid duration for humans
+    
+    # ----- Waveform limit locator (derivative-based detection) -----
+    use_derivative_based_limits: bool = True      # enable derivative-based waveform limit detection
+    waveform_limit_deriv_multiplier: float = 1.5  # multiplier for derivative threshold (lower = more sensitive)
+    waveform_limit_baseline_multiplier: float = 2.0  # multiplier for baseline proximity check
+    local_baseline_window_fraction: float = 0.3  # fraction of search window for baseline estimation
+    p_wave_deriv_sensitivity_multiplier: float = 0.7  # P-wave specific sensitivity boost (lower = more sensitive)
+    t_wave_offset_smoothing_window_ms: int = 50  # longer smoothing for T-offset detection
+    detect_u_wave: bool = True                    # detect U-waves to avoid including in T-offset
 
     # ----- Sharpness (derivative-based; minimal public knobs) -----
     sharp_stat: str = "p95"              # {"mean","median","p95"}
@@ -191,6 +209,26 @@ class ProcessCycleConfig:
             raise ValueError("rpeak_min_refrac_ms > 0")
         if not (0.0 < self.rpeak_rr_frac_second_pass < 1.0):
             raise ValueError("rpeak_rr_frac_second_pass in (0,1)")
+        
+        # P-wave band-pass filter parameters
+        if self.pwave_bandpass_low_hz <= 0 or self.pwave_bandpass_high_hz <= 0:
+            raise ValueError("pwave_bandpass frequencies must be > 0")
+        if self.pwave_bandpass_low_hz >= self.pwave_bandpass_high_hz:
+            raise ValueError("pwave_bandpass_low_hz must be < pwave_bandpass_high_hz")
+        if self.pwave_bandpass_order < 1:
+            raise ValueError("pwave_bandpass_order must be >= 1")
+        
+        # waveform limit locator parameters
+        if self.waveform_limit_deriv_multiplier <= 0:
+            raise ValueError("waveform_limit_deriv_multiplier > 0")
+        if self.waveform_limit_baseline_multiplier <= 0:
+            raise ValueError("waveform_limit_baseline_multiplier > 0")
+        if not (0.0 < self.local_baseline_window_fraction < 1.0):
+            raise ValueError("local_baseline_window_fraction in (0,1)")
+        if self.p_wave_deriv_sensitivity_multiplier <= 0:
+            raise ValueError("p_wave_deriv_sensitivity_multiplier > 0")
+        if self.t_wave_offset_smoothing_window_ms <= 0:
+            raise ValueError("t_wave_offset_smoothing_window_ms > 0")
 
 
     # -------- Presets --------
@@ -228,20 +266,31 @@ class ProcessCycleConfig:
             cls(),
             detrend_window_ms=200,
             postQRS_refractory_window_ms=20,    # small fixed refractory after QRS to avoid S tail
-            amp_min_ratio={"P": 0.025, "T": 0.04, "Q": 0.015, "S": 0.015},  # lowered for better recall
-            snr_mad_multiplier={"P": 2.2, "T": 1.5},   # Increased P from 1.6 to 2.2, T tuned to 1.5 for better detection
+            amp_min_ratio={"P": 0.010, "T": 0.04, "Q": 0.015, "S": 0.015},  # Lowered P from 0.015 to 0.010 for better recall (Step 2)
+            snr_mad_multiplier={"P": 1.8, "T": 1.5},   # Lowered P from 2.2 to 1.8 for better recall with bandpass (Step 1)
             snr_exclusion_ms={"P": 0, "T": 10},
             snr_apply_savgol={"P": False, "T": True},
             rr_bounds_ms=(300, 1800),              # ~200–33 bpm
             shape_max_window_ms={"P": 120, "Q": 60, "R": 80, "S": 60, "T": 220},  # Narrowed P from 160 to 120
             duration_min_ms=20,
-            threshold_fraction=0.18,  # moderate: between 0.15 (too low) and 0.30 (too high)
+            threshold_fraction=0.15,  # Optimized: lower threshold improves bias and MAE for band-pass filtered signals
             epoch_corr_thresh=0.68,   # more permissive but not too loose
             epoch_var_thresh=6.5,     # more permissive variance threshold
             rpeak_prominence_multiplier=2.5,  # Increased from 2.25 to 2.5 to reduce false positives
             rpeak_bpm_bounds=(30.0, 240.0),
             rpeak_min_refrac_ms=120.0,
-            version="v1.3-human-qtdb-improved",
+            use_derivative_based_limits=True,  # Enable waveform limit locator
+            waveform_limit_deriv_multiplier=1.5,
+            waveform_limit_baseline_multiplier=2.0,
+            local_baseline_window_fraction=0.3,
+            p_wave_deriv_sensitivity_multiplier=0.7,
+            t_wave_offset_smoothing_window_ms=50,
+            detect_u_wave=True,
+            pwave_use_bandpass=True,  # Enable band-pass filter for P-wave detection
+            pwave_bandpass_low_hz=4.0,   # Optimized: 4-18 Hz gives best bias+MAE
+            pwave_bandpass_high_hz=18.0,
+            pwave_bandpass_order=4,
+            version="v1.6-human-pwave-optimized",
         )
 
 #

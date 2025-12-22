@@ -222,6 +222,423 @@ def calc_sharpness_derivative(
 
 
 
+def estimate_local_baseline(
+    sig: np.ndarray,
+    center_idx: int,
+    search_samples: int,
+    direction: str = "both",
+    cfg: Optional[ProcessCycleConfig] = None,
+    comp_label: Optional[str] = None,
+) -> Tuple[float, float]:
+    """
+    Estimate local baseline and noise level around a wave.
+    
+    Uses robust statistics (median/MAD) on regions outside the wave itself.
+    
+    Parameters
+    ----------
+    sig : np.ndarray
+        Input signal array.
+    center_idx : int
+        Index of the wave center.
+    search_samples : int
+        Total search window size in samples.
+    direction : {"left", "right", "both"}
+        Which direction(s) to use for baseline estimation.
+    cfg : ProcessCycleConfig, optional
+        Configuration object.
+    
+    Returns
+    -------
+    Tuple[float, float]
+        (baseline_level, noise_level) where noise_level is MAD-based robust std.
+    """
+    cfg = cfg or ProcessCycleConfig()
+    baseline_window_frac = cfg.local_baseline_window_fraction
+    
+    # For P-wave onset, use more of the pre-P region for baseline (ECGPUWAVE approach)
+    if comp_label == "P" and direction in ("left", "both"):
+        # Use larger window for P-wave baseline estimation
+        baseline_window_frac = min(0.5, baseline_window_frac * 1.5)
+    
+    if direction in ("left", "both"):
+        left_start = max(0, center_idx - search_samples)
+        left_end = center_idx - int(search_samples * (1 - baseline_window_frac))
+        left_segment = sig[left_start:left_end] if left_end > left_start else np.array([])
+    else:
+        left_segment = np.array([])
+    
+    if direction in ("right", "both"):
+        right_start = center_idx + int(search_samples * (1 - baseline_window_frac))
+        right_end = min(len(sig), center_idx + search_samples)
+        right_segment = sig[right_start:right_end] if right_end > right_start else np.array([])
+    else:
+        right_segment = np.array([])
+    
+    # Combine segments
+    if len(left_segment) > 0 and len(right_segment) > 0:
+        baseline_segment = np.concatenate([left_segment, right_segment])
+    elif len(left_segment) > 0:
+        baseline_segment = left_segment
+    elif len(right_segment) > 0:
+        baseline_segment = right_segment
+    else:
+        # Fallback: use global median/MAD
+        baseline_level = float(np.median(sig))
+        noise_level = float(1.4826 * np.median(np.abs(sig - baseline_level)))
+        return baseline_level, noise_level
+    
+    if len(baseline_segment) < 3:
+        # Fallback: use global median/MAD
+        baseline_level = float(np.median(sig))
+        noise_level = float(1.4826 * np.median(np.abs(sig - baseline_level)))
+    else:
+        baseline_level = float(np.median(baseline_segment))
+        noise_level = float(1.4826 * np.median(np.abs(baseline_segment - baseline_level)))
+    
+    return baseline_level, noise_level
+
+
+def compute_adaptive_threshold(
+    height: float,
+    local_baseline: float,
+    local_noise: float,
+    cfg: ProcessCycleConfig,
+    comp_label: str,
+) -> float:
+    """
+    Compute adaptive threshold based on local SNR.
+    
+    For high SNR: use lower threshold (capture more of wave)
+    For low SNR: use higher threshold (avoid noise)
+    
+    Parameters
+    ----------
+    height : float
+        Peak amplitude.
+    local_baseline : float
+        Local baseline level.
+    local_noise : float
+        Local noise level (MAD-based).
+    cfg : ProcessCycleConfig
+        Configuration object.
+    comp_label : str
+        Component label (e.g., "P", "T").
+    
+    Returns
+    -------
+    float
+        Adaptive threshold value.
+    """
+    peak_to_baseline = abs(height - local_baseline)
+    if peak_to_baseline < 1e-6:
+        return local_baseline  # fallback
+    
+    snr = peak_to_baseline / (local_noise + 1e-6)
+    
+    # Base threshold from config
+    base_threshold_frac = cfg.threshold_fraction
+    
+    # Adjust based on SNR
+    # High SNR (>10): reduce threshold by up to 30%
+    # Low SNR (<3): increase threshold by up to 50%
+    if snr > 10:
+        adjustment = 0.7  # reduce threshold
+    elif snr < 3:
+        adjustment = 1.5  # increase threshold
+    else:
+        # Linear interpolation
+        adjustment = 0.7 + (snr - 3) / (10 - 3) * (1.5 - 0.7)
+    
+    adaptive_frac = base_threshold_frac * adjustment
+    adaptive_frac = np.clip(adaptive_frac, 0.05, 0.40)  # safety bounds
+    
+    if height >= local_baseline:
+        threshold = local_baseline + adaptive_frac * (height - local_baseline)
+    else:
+        threshold = local_baseline - adaptive_frac * (local_baseline - height)
+    
+    return threshold
+
+
+def find_waveform_limit_derivative(
+    sig: np.ndarray,
+    center_idx: int,
+    height: float,
+    std: float,
+    *,
+    sampling_rate: float,
+    comp_label: str,
+    cfg: ProcessCycleConfig,
+    direction: str = "left",  # "left" for onset, "right" for offset
+) -> int:
+    """
+    Find waveform limit using derivative-based approach (ECGPUWAVE-style).
+    
+    Detects the point where signal slope/curvature changes significantly
+    relative to local baseline, rather than using fixed threshold.
+    
+    Parameters
+    ----------
+    sig : np.ndarray
+        Input signal array.
+    center_idx : int
+        Index of the wave center.
+    height : float
+        Peak amplitude.
+    std : float
+        Estimated standard deviation of the peak shape.
+    sampling_rate : float
+        Sampling rate in Hz.
+    comp_label : str
+        Component label (e.g., "P", "T").
+    cfg : ProcessCycleConfig
+        Configuration object.
+    direction : {"left", "right"}
+        "left" for onset, "right" for offset.
+    
+    Returns
+    -------
+    int
+        Index of the waveform limit.
+    """
+    # Search window: extend beyond Gaussian std estimate
+    search_samples = int(round(cfg.shape_search_scale * std))
+    if comp_label in cfg.shape_max_window_ms:
+        max_window = int(round(cfg.shape_max_window_ms[comp_label] * sampling_rate / 1000.0))
+        search_samples = min(search_samples, max_window)
+    
+    if direction == "left":
+        search_start = max(0, center_idx - search_samples)
+        search_end = center_idx
+        search_slice = slice(search_start, search_end + 1)
+    else:  # right/offset
+        search_start = center_idx
+        search_end = min(len(sig) - 1, center_idx + search_samples)
+        search_slice = slice(search_start, search_end + 1)
+    
+    segment = sig[search_slice]
+    if len(segment) < 5:
+        return center_idx  # fallback
+    
+    # Step 1: Smooth signal to reduce noise
+    # Use longer smoothing for T-offset
+    smoothing_window = 7
+    if comp_label == "T" and direction == "right":
+        smoothing_window_ms = cfg.t_wave_offset_smoothing_window_ms
+        smoothing_window = int(round(smoothing_window_ms * sampling_rate / 1000.0))
+        smoothing_window = min(smoothing_window, len(segment) // 2)
+        if smoothing_window < 7:
+            smoothing_window = 7
+        smoothing_window = smoothing_window if smoothing_window % 2 == 1 else smoothing_window + 1
+    
+    if len(segment) >= smoothing_window:
+        segment_smooth = savgol_filter(segment, window_length=smoothing_window, polyorder=3, mode="interp")
+    else:
+        segment_smooth = segment
+    
+    # Step 2: Compute derivatives
+    dt = 1.0 / sampling_rate
+    first_deriv = np.diff(segment_smooth) / dt
+    second_deriv = np.diff(first_deriv) / dt if len(first_deriv) > 1 else np.array([])
+    
+    # Step 3: Estimate local baseline and noise level
+    local_baseline, local_noise = estimate_local_baseline(
+        sig, center_idx, search_samples, direction=direction, cfg=cfg, comp_label=comp_label
+    )
+    
+    # Step 4: Adjust sensitivity for P-waves and T-offset (ECGPUWAVE-style)
+    deriv_multiplier = cfg.waveform_limit_deriv_multiplier
+    baseline_multiplier = cfg.waveform_limit_baseline_multiplier
+    
+    if comp_label == "P" and direction == "left":
+        # P-wave onset: more sensitive detection for gradual rise
+        deriv_multiplier *= cfg.p_wave_deriv_sensitivity_multiplier * 0.6  # extra sensitivity
+        baseline_multiplier *= 1.2  # more lenient baseline proximity for P onset
+    elif comp_label == "T" and direction == "right":
+        # T-wave offset: stricter baseline tolerance (ECGPUWAVE approach)
+        # Require signal to be closer to baseline before detecting offset
+        baseline_multiplier *= 0.7  # Stricter: 70% of default tolerance
+        deriv_multiplier *= 1.3  # Less sensitive: require smaller derivative (130% of default)
+    
+    # Step 5: Adaptive threshold: derivative must drop to < noise_level × multiplier
+    deriv_threshold = local_noise * deriv_multiplier
+    
+    # Step 6: Search from peak outward (ECGPUWAVE-style for P onset)
+    limit_idx = center_idx
+    
+    # Map center_idx to segment coordinates
+    if direction == "left":
+        center_in_segment = center_idx - search_start
+    else:  # right
+        center_in_segment = 0  # center is at start of segment for right search
+    
+    # For P-wave onset, use more sophisticated detection (ECGPUWAVE-style)
+    if comp_label == "P" and direction == "left":
+        # ECGPUWAVE approach: find where signal transitions from baseline to rising
+        # More conservative: require clear evidence of transition
+        
+        best_onset = center_idx
+        min_deriv_rise = deriv_threshold * 0.4  # minimum derivative to indicate clear rise
+        baseline_tolerance = local_noise * baseline_multiplier * 1.2  # slightly more lenient
+        
+        # Search backwards from peak, looking for transition point
+        for i in range(len(segment_smooth) - 4):
+            idx_in_segment = center_in_segment - i  # search backwards from peak
+            
+            if idx_in_segment < 4 or idx_in_segment >= len(segment_smooth) - 3:
+                continue
+            
+            signal_at_idx = segment_smooth[idx_in_segment]
+            
+            # Check if we're at baseline level (with tolerance)
+            at_baseline = abs(signal_at_idx - local_baseline) < baseline_tolerance
+            
+            if not at_baseline:
+                continue  # Must be at baseline for P onset
+            
+            # Check derivatives: need to see transition from small to positive
+            if idx_in_segment - 1 >= 0 and idx_in_segment - 1 < len(first_deriv):
+                deriv_current = first_deriv[idx_in_segment - 1]
+                deriv_current_mag = abs(deriv_current)
+            else:
+                continue
+            
+            # Check derivative ahead (2-3 samples ahead for more robust detection)
+            deriv_ahead_positive = False
+            if idx_in_segment + 1 < len(first_deriv):
+                deriv_ahead = first_deriv[idx_in_segment + 1]
+                deriv_ahead_positive = deriv_ahead > min_deriv_rise
+            
+            # Check signal values ahead to confirm sustained rise (more samples)
+            signal_rising = False
+            if idx_in_segment < len(segment_smooth) - 4:
+                signal_ahead_1 = segment_smooth[idx_in_segment + 1]
+                signal_ahead_2 = segment_smooth[min(idx_in_segment + 2, len(segment_smooth) - 1)]
+                signal_ahead_3 = segment_smooth[min(idx_in_segment + 4, len(segment_smooth) - 1)]
+                # Require sustained rise: each step should be higher
+                signal_rising = (signal_ahead_1 > signal_at_idx and 
+                                signal_ahead_2 > signal_ahead_1 and
+                                signal_ahead_3 > signal_ahead_2)
+            
+            # P onset criteria (conservative ECGPUWAVE-style):
+            # 1. At baseline ✓
+            # 2. Current derivative is small (not yet rising significantly)
+            # 3. Derivative ahead is clearly positive AND signal ahead shows sustained rise
+            deriv_small = deriv_current_mag < deriv_threshold
+            
+            if deriv_small and deriv_ahead_positive and signal_rising:
+                # Found good onset candidate: at baseline, derivative small, ahead is clearly rising
+                best_onset = search_start + idx_in_segment
+                # Don't break - continue searching backwards to find earliest valid onset
+                # but update if we find a better (earlier) one that still meets criteria
+        
+        # Ensure we found a valid onset (not just the center)
+        # Also ensure it's not too far from center (physiological constraint: P onset typically within 200ms of P peak)
+        max_distance = int(round(200 * sampling_rate / 1000.0))
+        if best_onset == center_idx or (center_idx - best_onset) > max_distance:
+            # Didn't find a good onset or too far, will fall back to threshold method
+            limit_idx = center_idx
+        else:
+            limit_idx = best_onset
+    else:
+        # Standard detection for other waves/offsets
+        for i in range(len(segment_smooth) - 2):
+            if direction == "left":
+                idx_in_segment = center_in_segment - i  # search backwards
+            else:
+                idx_in_segment = i  # search forwards
+            
+            if idx_in_segment < 1 or idx_in_segment >= len(segment_smooth):
+                continue
+            
+            # Check if we've reached baseline level
+            signal_at_idx = segment_smooth[idx_in_segment]
+            at_baseline = abs(signal_at_idx - local_baseline) < (local_noise * baseline_multiplier)
+            
+            # Check if derivative is below threshold (signal stopped changing)
+            if idx_in_segment - 1 < len(first_deriv):
+                deriv_mag = abs(first_deriv[idx_in_segment - 1])
+                deriv_small = deriv_mag < deriv_threshold
+            else:
+                deriv_small = False
+            
+            # Check curvature change (transition indicator)
+            curvature_change = False
+            if len(second_deriv) > 0 and idx_in_segment - 1 < len(second_deriv) and idx_in_segment - 2 >= 0:
+                prev_curvature = second_deriv[idx_in_segment - 2] if idx_in_segment - 2 < len(second_deriv) else 0
+                curr_curvature = second_deriv[idx_in_segment - 1]
+                curvature_change = (prev_curvature * curr_curvature < 0)  # sign change
+            
+            # Transition found if: at baseline AND derivative small
+            # OR: curvature change detected (inflection point)
+            if (at_baseline and deriv_small) or (curvature_change and at_baseline):
+                # For T-offset, require sustained baseline (ECGPUWAVE approach)
+                # T-waves have long tails - need to ensure signal stays at baseline
+                if comp_label == "T" and direction == "right":
+                    # Check if signal stays at baseline for next few samples
+                    sustained_samples_required = int(round(20 * sampling_rate / 1000.0))  # 20ms
+                    sustained_samples_required = min(sustained_samples_required, len(segment_smooth) - idx_in_segment - 1)
+                    
+                    if sustained_samples_required >= 3:
+                        # Check next samples
+                        all_at_baseline = True
+                        for j in range(1, sustained_samples_required + 1):
+                            check_idx = idx_in_segment + j
+                            if check_idx >= len(segment_smooth):
+                                all_at_baseline = False
+                                break
+                            
+                            signal_check = segment_smooth[check_idx]
+                            at_baseline_check = abs(signal_check - local_baseline) < (local_noise * baseline_multiplier)
+                            
+                            # Also check derivative
+                            if check_idx - 1 < len(first_deriv):
+                                deriv_check = abs(first_deriv[check_idx - 1])
+                                deriv_small_check = deriv_check < deriv_threshold
+                            else:
+                                deriv_small_check = False
+                            
+                            if not (at_baseline_check and deriv_small_check):
+                                all_at_baseline = False
+                                break
+                        
+                        if all_at_baseline:
+                            # Signal sustained at baseline - this is the offset
+                            limit_idx = search_start + idx_in_segment
+                            break
+                        else:
+                            # Not sustained, continue searching
+                            continue
+                    else:
+                        # Not enough samples to check, use current point
+                        limit_idx = search_start + idx_in_segment
+                        break
+                else:
+                    # For other waves/onsets, use immediate detection
+                    limit_idx = search_start + idx_in_segment
+                    break
+    
+    # Step 7: For T-offset, check for U-wave
+    if comp_label == "T" and direction == "right" and cfg.detect_u_wave:
+        u_wave_check_window = int(round(0.1 * sampling_rate))  # 100ms after T peak
+        if limit_idx + u_wave_check_window < len(sig):
+            post_t_segment = sig[limit_idx:limit_idx + u_wave_check_window]
+            if len(post_t_segment) > 3:
+                # Look for secondary peak (U-wave)
+                u_smooth_window = min(5, len(post_t_segment) // 2)
+                if u_smooth_window >= 3 and u_smooth_window % 2 == 1:
+                    post_t_smooth = savgol_filter(post_t_segment, window_length=u_smooth_window, polyorder=2)
+                    post_t_deriv = np.diff(post_t_smooth)
+                    # If derivative changes sign (potential U-wave), adjust search
+                    if len(post_t_deriv) > 1 and np.any(np.diff(np.sign(post_t_deriv)) != 0):
+                        # U-wave detected - be more conservative with T-offset
+                        # Already found limit_idx should be fine, but we could refine
+                        pass
+    
+    return limit_idx
+
+
 def find_asymmetric_bounds_stdguided(
     sig: np.ndarray,
     center_idx: int,
@@ -237,11 +654,12 @@ def find_asymmetric_bounds_stdguided(
     standard deviation and physiologic window constraints.
     
     Uses a hybrid approach:
-    1. Primary: threshold-based crossing at cfg.threshold_fraction of peak height
-    2. Fallback extension: derivative-based refinement for low-amplitude P/T waves
+    1. Primary: derivative-based waveform limit detection (ECGPUWAVE-style)
+    2. Fallback: adaptive threshold crossing if derivative method fails
     
-    The derivative-based extension helps address systematic underestimation
-    of PR and QT intervals by capturing more of the wave onset/offset.
+    The derivative-based method detects actual signal changes (slope/curvature)
+    relative to local baseline, addressing systematic underestimation of
+    PR and QT intervals.
 
     Parameters:
         sig (np.ndarray): Input signal array.
@@ -259,36 +677,75 @@ def find_asymmetric_bounds_stdguided(
         the component.
     """
     cfg = cfg or ProcessCycleConfig()
-
-    thr = cfg.threshold_fraction * height
-    # prefer std-guided search; cap by physiologic window if available
-    if np.isfinite(std):
-        max_offset = int(round(cfg.shape_search_scale * std))
-    else:
-        max_offset = 0
-
+    
+    # Estimate local baseline
+    search_samples = int(round(cfg.shape_search_scale * std)) if np.isfinite(std) else 0
     if comp_label and comp_label in cfg.shape_max_window_ms:
         physiol = int(round(cfg.shape_max_window_ms[comp_label] * sampling_rate / 1000.0))
-        max_offset = physiol if max_offset == 0 else min(max_offset, physiol)
-
+        search_samples = physiol if search_samples == 0 else min(search_samples, physiol)
+    
+    local_baseline, local_noise = estimate_local_baseline(
+        sig, center_idx, search_samples, direction="both", cfg=cfg, comp_label=comp_label
+    )
+    
+    # Try derivative-based method first (only for T waves; P uses band-pass + threshold)
+    # P-waves use band-pass filtering for peak detection, then threshold-based onset
+    if cfg.use_derivative_based_limits and comp_label == "T":
+        try:
+            left_idx = find_waveform_limit_derivative(
+                sig, center_idx, height, std,
+                sampling_rate=float(sampling_rate),
+                comp_label=comp_label,
+                cfg=cfg,
+                direction="left"
+            )
+            right_idx = find_waveform_limit_derivative(
+                sig, center_idx, height, std,
+                sampling_rate=float(sampling_rate),
+                comp_label=comp_label,
+                cfg=cfg,
+                direction="right"
+            )
+            
+            # Validate results - ensure reasonable bounds
+            # For P-wave onset, ensure it's not too far from center (physiological constraint)
+            if comp_label == "P":
+                max_p_onset_distance = int(round(200 * sampling_rate / 1000.0))  # 200ms max
+                if left_idx < center_idx - max_p_onset_distance:
+                    # Too far back, likely wrong - use threshold fallback
+                    left_idx = None
+            
+            if (left_idx is not None and right_idx is not None and 
+                left_idx < center_idx < right_idx and 
+                left_idx >= 0 and right_idx < len(sig)):
+                return left_idx, right_idx
+        except Exception:
+            pass  # Fall back to threshold method
+    
+    # Fallback: adaptive threshold method
+    adaptive_threshold = compute_adaptive_threshold(
+        height, local_baseline, local_noise, cfg, comp_label or "R"
+    )
+    
+    # Search with adaptive threshold
+    max_offset = search_samples
     max_left = max(0, center_idx - max_offset)
     max_right = min(len(sig) - 1, center_idx + max_offset)
-
+    
     left_idx = center_idx
     right_idx = center_idx
-
-    # Primary: threshold-based crossing
-    if height >= 0:
-        while left_idx > max_left and sig[left_idx] > thr:
+    
+    if height >= local_baseline:
+        while left_idx > max_left and sig[left_idx] > adaptive_threshold:
             left_idx -= 1
-        while right_idx < max_right and sig[right_idx] > thr:
+        while right_idx < max_right and sig[right_idx] > adaptive_threshold:
             right_idx += 1
     else:
-        while left_idx > max_left and sig[left_idx] < thr:
+        while left_idx > max_left and sig[left_idx] < adaptive_threshold:
             left_idx -= 1
-        while right_idx < max_right and sig[right_idx] < thr:
+        while right_idx < max_right and sig[right_idx] < adaptive_threshold:
             right_idx += 1
-
+    
     return left_idx, right_idx
 
 

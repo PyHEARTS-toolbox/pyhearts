@@ -90,10 +90,19 @@ def log_peak_result(
         return None, None
 
     # Polarity checks
+    # Step 5: Allow negative P-waves for inverted leads (but prefer positive)
     if expected_polarity == "peak" and height < 0 and comp in ("P", "T"):
-        if verbose:
-            print(f"[Cycle {cycle_idx}]: {comp} polarity invalid (expected positive).")
-        return None, None
+        # For P-waves, allow negative if it's the only detection (inverted leads)
+        # But log it as a warning
+        if comp == "P":
+            if verbose:
+                print(f"[Cycle {cycle_idx}]: P-wave is negative (inverted lead), accepting anyway.")
+            # Accept negative P-wave (inverted lead)
+        else:
+            # T-waves: still reject negative (less common)
+            if verbose:
+                print(f"[Cycle {cycle_idx}]: {comp} polarity invalid (expected positive).")
+            return None, None
     if expected_polarity == "trough" and height >= 0 and comp in ("Q", "S"):
         if verbose:
             print(f"[Cycle {cycle_idx}]: {comp} polarity invalid (expected negative).")
