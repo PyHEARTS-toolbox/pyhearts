@@ -22,6 +22,7 @@ import numpy as np
 from scipy.signal import butter, filtfilt, savgol_filter
 
 from pyhearts.config import ProcessCycleConfig
+from pyhearts.processing.qrs_removal import remove_qrs_sigmoid, remove_baseline_wander
 
 
 @dataclass
@@ -467,6 +468,8 @@ class DerivativeBasedPeakDetector:
         """
         Detect T-wave for a single cycle using derivative-based method.
         
+        Uses QRS removal (ECGPUWAVE approach) if enabled in config.
+        
         Parameters
         ----------
         signal : np.ndarray
@@ -498,6 +501,7 @@ class DerivativeBasedPeakDetector:
         if search_end - search_start < 10:
             return None
         
+        # filtered_signal is already QRS-removed if enabled (from detect_all_peaks)
         # Try both positive and negative T-waves
         t_peak_pos, t_amp_pos = self.detect_peak_derivative(
             filtered_signal, search_start, search_end, polarity="positive"
@@ -520,10 +524,13 @@ class DerivativeBasedPeakDetector:
             return None
         
         # Validate with SNR gate
+        # IMPORTANT: Use the same signal that the peak was detected from (filtered_signal)
+        # for SNR calculation, not the original signal, as they have different scales
         if hasattr(self.cfg, 'snr_mad_multiplier') and 'T' in self.cfg.snr_mad_multiplier:
+            # Use filtered signal for SNR gate (same as peak detection)
             local_start = max(0, t_peak_idx - 20)
-            local_end = min(len(signal), t_peak_idx + 20)
-            local_segment = signal[local_start:local_end]
+            local_end = min(len(filtered_signal), t_peak_idx + 20)
+            local_segment = filtered_signal[local_start:local_end]
             local_median = np.median(local_segment)
             local_mad = 1.4826 * np.median(np.abs(local_segment - local_median))
             snr_threshold = local_mad * self.cfg.snr_mad_multiplier['T']
@@ -556,6 +563,7 @@ class DerivativeBasedPeakDetector:
         Detect all P and T waves for all cycles using derivative-based method.
         
         Uses full-signal filtering before detection to avoid edge artifacts.
+        Optionally uses QRS removal (ECGPUWAVE approach) for T-wave detection.
         
         Parameters
         ----------
@@ -579,6 +587,36 @@ class DerivativeBasedPeakDetector:
             highcut=self.cfg.pwave_bandpass_high_hz,
         )
         
+        # For T-wave detection: optionally remove QRS complexes (ECGPUWAVE approach)
+        use_qrs_removal = getattr(self.cfg, 't_wave_use_qrs_removal', True)
+        filtered_pt_for_t = filtered_pt
+        
+        if use_qrs_removal and len(r_peaks) > 0:
+            try:
+                # Remove QRS from full signal
+                signal_no_qrs, _ = remove_qrs_sigmoid(
+                    signal,
+                    r_peaks,
+                    sampling_rate=self.sampling_rate,
+                )
+                
+                # Apply baseline removal (ECGPUWAVE style)
+                signal_no_qrs = remove_baseline_wander(
+                    signal_no_qrs,
+                    self.sampling_rate,
+                )
+                
+                # Apply band-pass filter to QRS-removed signal
+                filtered_pt_for_t = self.filter_full_signal(
+                    signal_no_qrs,
+                    filter_type="bandpass",
+                    lowcut=self.cfg.pwave_bandpass_low_hz,
+                    highcut=self.cfg.pwave_bandpass_high_hz,
+                )
+            except Exception:
+                # Fallback to original filtered signal if QRS removal fails
+                filtered_pt_for_t = filtered_pt
+        
         # Detect peaks for each cycle
         results = {}
         
@@ -586,11 +624,11 @@ class DerivativeBasedPeakDetector:
             prev_r = r_peaks[i - 1] if i > 0 else None
             next_r = r_peaks[i + 1] if i < len(r_peaks) - 1 else None
             
-            # Detect P-wave
+            # Detect P-wave (use original filtered signal)
             p_wave = self.detect_p_wave(signal, filtered_pt, r_peak_idx, prev_r)
             
-            # Detect T-wave
-            t_wave = self.detect_t_wave(signal, filtered_pt, r_peak_idx, next_r)
+            # Detect T-wave (use QRS-removed signal if enabled)
+            t_wave = self.detect_t_wave(signal, filtered_pt_for_t, r_peak_idx, next_r)
             
             results[i] = {
                 'P': p_wave,

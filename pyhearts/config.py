@@ -17,6 +17,7 @@ class ProcessCycleConfig:
     - epoch_corr_thresh: 0.70 retains more beats with morphological variation
     """
     #  ----  R-peak detection  ---- 
+    rpeak_method: str = "prominence"  # "prominence", "pan_tompkins", or "bandpass_energy"
     rpeak_prominence_multiplier: float = 2.5          # σ multiplier (lowered from 3.0 for better recall)
     rpeak_min_refrac_ms: float = 100.0                # first-pass refractory
     rpeak_rr_frac_second_pass: float = 0.50           # second-pass refractory = k * median RR (lowered for sensitivity)
@@ -200,6 +201,8 @@ class ProcessCycleConfig:
             raise ValueError("sharp_amp_norm ∈ {'p2p','rms','mad'}")
         
         # r-peak
+        if self.rpeak_method not in {"prominence", "pan_tompkins", "bandpass_energy"}:
+            raise ValueError("rpeak_method must be 'prominence', 'pan_tompkins', or 'bandpass_energy'")
         lo_bpm, hi_bpm = self.rpeak_bpm_bounds
         if not (0 < lo_bpm < hi_bpm):
             raise ValueError("rpeak_bpm_bounds require 0 < low < high")

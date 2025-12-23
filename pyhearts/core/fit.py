@@ -358,14 +358,34 @@ class PyHEARTS:
                 # Continue anyway but log the warning
                 # (Don't fail completely - let user decide)
             
-            filtered_r_peaks = r_peak_detection(
-                ecg_signal, 
-                self.sampling_rate, 
-                cfg=self.cfg,
-                plot=self.plot,
-                sensitivity=self.sensitivity,
-                raw_ecg=raw_ecg,
-            )
+            # Use requested R-peak detector
+            if self.cfg.rpeak_method == "pan_tompkins":
+                from pyhearts.processing.pan_tompkins import pan_tompkins_r_peak_detection
+                filtered_r_peaks = pan_tompkins_r_peak_detection(
+                    ecg_signal,
+                    self.sampling_rate,
+                    cfg=self.cfg,
+                    plot=self.plot,
+                    raw_ecg=raw_ecg,
+                )
+            elif self.cfg.rpeak_method == "bandpass_energy":
+                from pyhearts.processing.bandpass_energy_rpeak import bandpass_energy_r_peak_detection
+                filtered_r_peaks = bandpass_energy_r_peak_detection(
+                    ecg_signal,
+                    self.sampling_rate,
+                    cfg=self.cfg,
+                    plot=self.plot,
+                    raw_ecg=raw_ecg,
+                )
+            else:
+                filtered_r_peaks = r_peak_detection(
+                    ecg_signal, 
+                    self.sampling_rate, 
+                    cfg=self.cfg,
+                    plot=self.plot,
+                    sensitivity=self.sensitivity,
+                    raw_ecg=raw_ecg,
+                )
             self.r_peak_indices = filtered_r_peaks
         
             # Handle no R-peaks case
@@ -413,11 +433,17 @@ class PyHEARTS:
                     for cycle_idx, cycle_label in enumerate(cycles):
                         one_cycle = epochs_df.loc[epochs_df["cycle"] == cycle_label]
                         if not one_cycle.empty:
-                            # Get cycle time range from signal_x
-                            cycle_signal_x = one_cycle["signal_x"].values
-                            if len(cycle_signal_x) > 0:
-                                cycle_start = int(cycle_signal_x[0])
-                                cycle_end = int(cycle_signal_x[-1])
+                            # Get cycle time range from index column (global sample indices)
+                            # signal_x contains relative time values, not sample indices
+                            if "index" in one_cycle.columns:
+                                cycle_indices = one_cycle["index"].values
+                            else:
+                                # Fallback: try to use signal_x if index not available
+                                cycle_indices = one_cycle["signal_x"].values
+                            
+                            if len(cycle_indices) > 0:
+                                cycle_start = int(cycle_indices[0])
+                                cycle_end = int(cycle_indices[-1])
                                 # Find R-peak that falls within this cycle's time range
                                 r_peaks_in_cycle = filtered_r_peaks[
                                     (filtered_r_peaks >= cycle_start) & (filtered_r_peaks <= cycle_end)
@@ -432,37 +458,50 @@ class PyHEARTS:
             
             component_keys = ["P", "Q", "R", "S", "T"]
             peak_feature_keys = [
+                # Global indices (absolute sample indices)
                 "global_center_idx",
                 "global_le_idx",
                 "global_ri_idx",
 
+                # Time-domain locations (ms relative to cycle)
                 "center_ms",
                 "le_ms",
                 "ri_ms",
-                
+
+                # Local indices (within cycle / detrended segment)
                 "center_idx",
                 "le_idx",
                 "ri_idx",
-                
+
+                # Gaussian fit parameters (morphology)
                 "gauss_center",
                 "gauss_height",
-                
                 "gauss_stdev_samples",
                 "gauss_stdev_ms",
                 "gauss_fwhm_samples",
                 "gauss_fwhm_ms",
-                
+
+                # FWHM-based boundary indices (inner width around peak)
+                "fwhm_le_idx",
+                "fwhm_ri_idx",
+                "fwhm_le_ms",
+                "fwhm_ri_ms",
+                "fwhm_global_le_idx",
+                "fwhm_global_ri_idx",
+
+                # Amplitudes at key points
                 "center_voltage",
                 "le_voltage",
                 "ri_voltage",
-                
+
+                # Duration / symmetry / sharpness
                 "duration_ms",
                 "rise_ms",
                 "decay_ms",
-                
                 "rdsm",
                 "sharpness",
 
+                # Area under the wave
                 "voltage_integral_uv_ms",
             ]
             interval_keys = [

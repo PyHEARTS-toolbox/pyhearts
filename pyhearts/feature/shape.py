@@ -120,6 +120,106 @@ def compute_voltage_integrals(
     return result
 
 
+def smooth_derivative(
+    signal: np.ndarray,
+    sampling_rate: float,
+    window_ms: float = 20.0,
+) -> np.ndarray:
+    """
+    Small helper: smooth signal and compute first derivative.
+
+    Used as a building block for edge detection based on slope changes.
+    """
+    if signal.size == 0:
+        return np.array([], dtype=float)
+
+    fs = float(sampling_rate)
+    win_samples = max(3, int(round(window_ms * fs / 1000.0)))
+    if win_samples % 2 == 0:
+        win_samples += 1
+
+    # light smoothing to reduce high-frequency noise before derivative
+    smoothed = savgol_filter(signal, window_length=win_samples, polyorder=2)
+    deriv = np.gradient(smoothed)
+    return deriv
+
+
+def find_edge_by_derivative_and_baseline(
+    signal: np.ndarray,
+    center_idx: int,
+    sampling_rate: float,
+    *,
+    direction: str,
+    max_distance_ms: float = 200.0,
+    slope_fraction: float = 0.2,
+    baseline_window_ms: float = 60.0,
+) -> int:
+    """
+    Generic edge finder:
+
+    - Works on the detrended ECG signal.
+    - Computes a smoothed derivative around the peak.
+    - Uses a fraction of the local max derivative plus a baseline estimate
+      to decide where the wave emerges from or returns to baseline.
+
+    This is a generic slope- and baseline-based edge finder within a physiologic
+    time window, suitable for locating waveform onsets/offsets around peaks.
+    """
+    n = signal.size
+    if n == 0:
+        return center_idx
+
+    center_idx = int(center_idx)
+    center_idx = max(0, min(center_idx, n - 1))
+
+    fs = float(sampling_rate)
+    max_dist = int(round(max_distance_ms * fs / 1000.0))
+    if direction == "left":
+        start = max(0, center_idx - max_dist)
+        end = center_idx
+    else:
+        start = center_idx
+        end = min(n - 1, center_idx + max_dist)
+
+    seg = signal[start : end + 1]
+    if seg.size < 3:
+        return center_idx
+
+    deriv = smooth_derivative(seg, sampling_rate)
+    # local derivative threshold
+    max_slope = float(np.max(np.abs(deriv)))
+    if max_slope <= 0:
+        return center_idx
+    slope_thresh = slope_fraction * max_slope
+
+    # baseline from outer window near segment edge
+    base_win = int(round(baseline_window_ms * fs / 1000.0))
+    if direction == "left":
+        base_start = max(0, start - base_win)
+        base_end = start
+    else:
+        base_start = end
+        base_end = min(n - 1, end + base_win)
+    base_segment = signal[base_start : base_end + 1]
+    baseline = float(np.median(base_segment)) if base_segment.size > 0 else 0.0
+
+    # walk away from center until both slope and amplitude get near baseline
+    if direction == "left":
+        it = np.arange(seg.size - 1, -1, -1)
+    else:
+        it = np.arange(seg.size)
+
+    edge_idx = center_idx
+    for k in it:
+        s_val = seg[k]
+        d_val = deriv[k]
+        if abs(d_val) <= slope_thresh and abs(s_val - baseline) <= abs(max_slope) * 0.05:
+            edge_idx = start + int(k)
+            break
+
+    return max(0, min(edge_idx, n - 1))
+
+
 
 def _coerce_odd_window(win: int, poly: int) -> int:
     """
@@ -688,8 +788,7 @@ def find_asymmetric_bounds_stdguided(
         sig, center_idx, search_samples, direction="both", cfg=cfg, comp_label=comp_label
     )
     
-    # Try derivative-based method first (only for T waves; P uses band-pass + threshold)
-    # P-waves use band-pass filtering for peak detection, then threshold-based onset
+    # Try derivative-based method first for T and (optionally) P waves.
     if cfg.use_derivative_based_limits and comp_label == "T":
         try:
             left_idx = find_waveform_limit_derivative(
@@ -747,7 +846,6 @@ def find_asymmetric_bounds_stdguided(
             right_idx += 1
     
     return left_idx, right_idx
-
 
 
 

@@ -218,7 +218,17 @@ def process_cycle(
                     )
                 }
             else:
-                new_gauss_center_idxs, new_gauss_heights, new_gauss_stdevs = new_gaussian_features_reshape.T
+                # When not using skewed, only extract first 3 columns (center, height, std)
+                # Handle case where reshape might have more columns than expected
+                if new_gaussian_features_reshape.shape[1] >= 3:
+                    new_gauss_center_idxs = new_gaussian_features_reshape[:, 0]
+                    new_gauss_heights = new_gaussian_features_reshape[:, 1]
+                    new_gauss_stdevs = new_gaussian_features_reshape[:, 2]
+                else:
+                    # Fallback if shape is unexpected
+                    new_gauss_center_idxs = new_gaussian_features_reshape[:, 0] if new_gaussian_features_reshape.shape[1] >= 1 else np.array([])
+                    new_gauss_heights = new_gaussian_features_reshape[:, 1] if new_gaussian_features_reshape.shape[1] >= 2 else np.array([])
+                    new_gauss_stdevs = new_gaussian_features_reshape[:, 2] if new_gaussian_features_reshape.shape[1] >= 3 else np.array([])
                 new_gauss_alphas = None
                 previous_gauss_features = {
                     comp: [center, height, std]
@@ -322,6 +332,55 @@ def process_cycle(
 
         # Directly assign gauss_idxs as peak_data (structure now matches)
         peak_data = gauss_idxs.copy()
+        
+        # Add precomputed T/P waves to peak_data if they weren't in Gaussian fit
+        # This ensures precomputed peaks are preserved even if Gaussian fitting failed
+        if precomputed_peaks is not None and cycle_idx in precomputed_peaks:
+            cycle_start_global = int(one_cycle["signal_x"].iloc[0]) if not one_cycle.empty else 0
+            
+            # Handle T-wave
+            if "T" not in peak_data:
+                t_annotation = precomputed_peaks[cycle_idx].get('T')
+                if t_annotation is not None:
+                    # Convert global index to cycle-relative for center_idx
+                    t_center_idx_rel = t_annotation.peak_idx - cycle_start_global
+                    if 0 <= t_center_idx_rel < len(sig_detrended):
+                        peak_data["T"] = {
+                            "global_center_idx": t_annotation.peak_idx,
+                            "center_idx": t_center_idx_rel,
+                            "gauss_center": None,
+                            "gauss_height": t_annotation.peak_amplitude,
+                            "gauss_stdev_samples": None,
+                            "gauss_fwhm_samples": None,
+                            "gauss_stdev_ms": None,
+                            "gauss_fwhm_ms": None,
+                        }
+                        # Add onset/offset if available
+                        if t_annotation.onset_idx is not None:
+                            peak_data["T"]["le_idx"] = t_annotation.onset_idx - cycle_start_global
+                        if t_annotation.offset_idx is not None:
+                            peak_data["T"]["ri_idx"] = t_annotation.offset_idx - cycle_start_global
+            
+            # Handle P-wave
+            if "P" not in peak_data:
+                p_annotation = precomputed_peaks[cycle_idx].get('P')
+                if p_annotation is not None:
+                    p_center_idx_rel = p_annotation.peak_idx - cycle_start_global
+                    if 0 <= p_center_idx_rel < len(sig_detrended):
+                        peak_data["P"] = {
+                            "global_center_idx": p_annotation.peak_idx,
+                            "center_idx": p_center_idx_rel,
+                            "gauss_center": None,
+                            "gauss_height": p_annotation.peak_amplitude,
+                            "gauss_stdev_samples": None,
+                            "gauss_fwhm_samples": None,
+                            "gauss_stdev_ms": None,
+                            "gauss_fwhm_ms": None,
+                        }
+                        if p_annotation.onset_idx is not None:
+                            peak_data["P"]["le_idx"] = p_annotation.onset_idx - cycle_start_global
+                        if p_annotation.offset_idx is not None:
+                            peak_data["P"]["ri_idx"] = p_annotation.offset_idx - cycle_start_global
 
         # if plot:
         #     plot_labeled_peaks(
@@ -367,7 +426,7 @@ def process_cycle(
         if r_center_idx is None:
             if verbose:
                 print(f"[Cycle {cycle_idx}]: Error -  R peak not detected — skipping cycle.")
-            return None  # or return {}, [], whatever your pipeline expects
+            return output_dict, previous_r_global_center_idx, previous_p_global_center_idx, None, previous_gauss_features
 
         if r_std is None:
             if verbose:
@@ -1000,7 +1059,17 @@ def process_cycle(
                     )
                 }
             else:
-                gauss_center_idxs, gauss_heights, gauss_stdevs = gaussian_features_reshape.T
+                # When not using skewed, only extract first 3 columns (center, height, std)
+                # Handle case where reshape might have more columns than expected
+                if gaussian_features_reshape.shape[1] >= 3:
+                    gauss_center_idxs = gaussian_features_reshape[:, 0]
+                    gauss_heights = gaussian_features_reshape[:, 1]
+                    gauss_stdevs = gaussian_features_reshape[:, 2]
+                else:
+                    # Fallback if shape is unexpected
+                    gauss_center_idxs = gaussian_features_reshape[:, 0] if gaussian_features_reshape.shape[1] >= 1 else np.array([])
+                    gauss_heights = gaussian_features_reshape[:, 1] if gaussian_features_reshape.shape[1] >= 2 else np.array([])
+                    gauss_stdevs = gaussian_features_reshape[:, 2] if gaussian_features_reshape.shape[1] >= 3 else np.array([])
                 gauss_alphas = None
                 previous_gauss_features = {
                     comp: [center, height, std]
@@ -1134,6 +1203,65 @@ def process_cycle(
             for comp, vals in gauss_idxs.items()
             if vals is not None
         }
+        
+        # Add precomputed T/P waves to peak_data if they weren't in Gaussian fit
+        # Also preserve precomputed onset/offset indices if available
+        if precomputed_peaks is not None and cycle_idx in precomputed_peaks:
+            cycle_start_global = int(one_cycle["signal_x"].iloc[0]) if not one_cycle.empty else 0
+            
+            # Handle T-wave
+            t_annotation = precomputed_peaks[cycle_idx].get('T')
+            if t_annotation is not None:
+                if "T" not in peak_data:
+                    # T-wave not in Gaussian fit, add it from precomputed
+                    t_center_idx_rel = t_annotation.peak_idx - cycle_start_global
+                    if 0 <= t_center_idx_rel < len(sig_detrended):
+                        peak_data["T"] = {
+                            "global_center_idx": t_annotation.peak_idx,
+                            "center_idx": t_center_idx_rel,
+                            "gauss_center": None,
+                            "gauss_height": t_annotation.peak_amplitude,
+                            "gauss_stdev_samples": None,
+                            "gauss_fwhm_samples": None,
+                            "gauss_stdev_ms": None,
+                            "gauss_fwhm_ms": None,
+                        }
+                # Add onset/offset indices from precomputed annotation
+                if "T" in peak_data:
+                    if t_annotation.onset_idx is not None:
+                        t_onset_idx_rel = t_annotation.onset_idx - cycle_start_global
+                        if 0 <= t_onset_idx_rel < len(sig_detrended):
+                            peak_data["T"]["le_idx"] = _safe_int(t_onset_idx_rel)
+                    if t_annotation.offset_idx is not None:
+                        t_offset_idx_rel = t_annotation.offset_idx - cycle_start_global
+                        if 0 <= t_offset_idx_rel < len(sig_detrended):
+                            peak_data["T"]["ri_idx"] = _safe_int(t_offset_idx_rel)
+            
+            # Handle P-wave
+            p_annotation = precomputed_peaks[cycle_idx].get('P')
+            if p_annotation is not None:
+                if "P" not in peak_data:
+                    p_center_idx_rel = p_annotation.peak_idx - cycle_start_global
+                    if 0 <= p_center_idx_rel < len(sig_detrended):
+                        peak_data["P"] = {
+                            "global_center_idx": p_annotation.peak_idx,
+                            "center_idx": p_center_idx_rel,
+                            "gauss_center": None,
+                            "gauss_height": p_annotation.peak_amplitude,
+                            "gauss_stdev_samples": None,
+                            "gauss_fwhm_samples": None,
+                            "gauss_stdev_ms": None,
+                            "gauss_fwhm_ms": None,
+                        }
+                if "P" in peak_data:
+                    if p_annotation.onset_idx is not None:
+                        p_onset_idx_rel = p_annotation.onset_idx - cycle_start_global
+                        if 0 <= p_onset_idx_rel < len(sig_detrended):
+                            peak_data["P"]["le_idx"] = _safe_int(p_onset_idx_rel)
+                    if p_annotation.offset_idx is not None:
+                        p_offset_idx_rel = p_annotation.offset_idx - cycle_start_global
+                        if 0 <= p_offset_idx_rel < len(sig_detrended):
+                            peak_data["P"]["ri_idx"] = _safe_int(p_offset_idx_rel)
 
         if plot:
             plot_labeled_peaks(xs_rel_idxs, sig_detrended, peak_data)
@@ -1252,7 +1380,9 @@ def process_cycle(
         center_idx = peak_data[comp].get("center_idx", np.nan)
         le_idx     = peak_data[comp].get("le_idx", np.nan)
         ri_idx     = peak_data[comp].get("ri_idx", np.nan)
-    
+        gauss_center = peak_data[comp].get("gauss_center", np.nan)
+        gauss_fwhm_samples = peak_data[comp].get("gauss_fwhm_samples", np.nan)
+
         # Global center idx
         if center_idx is not None and not np.isnan(center_idx) and int(center_idx) < len(xs_samples):
             global_center_idx = xs_samples[int(center_idx)]
@@ -1273,6 +1403,50 @@ def process_cycle(
         else:
             global_ri_idx = np.nan
         output_dict[f"{comp}_global_ri_idx"][cycle_idx] = global_ri_idx
+
+        # --- FWHM-based boundary indices (inner width around the Gaussian peak) ---
+        # These complement the derivative/threshold-based le/ri indices by providing
+        # a purely morphology-derived width (similar to classical FWHM).
+        fwhm_le_idx = np.nan
+        fwhm_ri_idx = np.nan
+        fwhm_le_ms = np.nan
+        fwhm_ri_ms = np.nan
+        fwhm_global_le_idx = np.nan
+        fwhm_global_ri_idx = np.nan
+
+        if (
+            gauss_center is not None
+            and gauss_fwhm_samples is not None
+            and not np.isnan(gauss_center)
+            and not np.isnan(gauss_fwhm_samples)
+        ):
+            half_width = float(gauss_fwhm_samples) / 2.0
+            # Local (cycle-relative) indices
+            left = int(round(gauss_center - half_width))
+            right = int(round(gauss_center + half_width))
+
+            # Clamp to valid range of xs_samples / sig_detrended
+            left = max(0, min(left, len(xs_samples) - 1))
+            right = max(0, min(right, len(xs_samples) - 1))
+
+            if right >= left:
+                fwhm_le_idx = float(left)
+                fwhm_ri_idx = float(right)
+                # Convert to ms using sampling_rate
+                fwhm_le_ms = (left / sampling_rate) * 1000.0
+                fwhm_ri_ms = (right / sampling_rate) * 1000.0
+
+                # Map to global sample indices via xs_samples
+                fwhm_global_le_idx = float(xs_samples[left])
+                fwhm_global_ri_idx = float(xs_samples[right])
+
+        # Store FWHM-based metrics into output_dict
+        output_dict[f"{comp}_fwhm_le_idx"][cycle_idx] = fwhm_le_idx
+        output_dict[f"{comp}_fwhm_ri_idx"][cycle_idx] = fwhm_ri_idx
+        output_dict[f"{comp}_fwhm_le_ms"][cycle_idx] = fwhm_le_ms
+        output_dict[f"{comp}_fwhm_ri_ms"][cycle_idx] = fwhm_ri_ms
+        output_dict[f"{comp}_fwhm_global_le_idx"][cycle_idx] = fwhm_global_le_idx
+        output_dict[f"{comp}_fwhm_global_ri_idx"][cycle_idx] = fwhm_global_ri_idx
 
 
         # Center voltage
