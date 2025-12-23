@@ -109,10 +109,10 @@ cython_debug/
 !docs/**/*.png
 !docs/**/*.jpg
 
-# Data files (uncomment if needed)
-# data/
-# raw_data/
-# results/
+# Data files
+data/
+raw_data/
+results/
 
 # Benchmark test data (large files - regenerate with generate_test_data.py)
 # Note: benchmark/ is now in dev/ which is ignored
@@ -165,4 +165,11 @@ pyhearts.egg-info/
 
 # Development and non-essential files (benchmarks, analysis, external tools)
 dev/
+
+# External tools and binaries
+ecgpuwave-*/
+
+# Development/utility scripts (not part of the toolbox)
+process_qtdb_full.py
+verify_installation.py
 
