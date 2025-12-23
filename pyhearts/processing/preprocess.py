@@ -70,8 +70,33 @@ def preprocess_ecg(
         # --- Step 1: Polynomial Detrending ---
         if poly_degree is not None:
             x = np.arange(ecg_processed.size)
-            coeffs = np.polyfit(x, ecg_processed, deg=poly_degree)
-            ecg_processed -= np.polyval(coeffs, x)
+            try:
+                # Step 4: Add error handling for polynomial detrending
+                # Use lower degree if high degree causes numerical issues
+                try:
+                    coeffs = np.polyfit(x, ecg_processed, deg=poly_degree)
+                    trend = np.polyval(coeffs, x)
+                    # Check for invalid values
+                    if np.any(~np.isfinite(trend)):
+                        # Fallback to lower degree
+                        if poly_degree > 1:
+                            coeffs = np.polyfit(x, ecg_processed, deg=1)
+                            trend = np.polyval(coeffs, x)
+                        else:
+                            # Fallback to simple mean removal
+                            trend = np.mean(ecg_processed)
+                    ecg_processed -= trend
+                except (np.linalg.LinAlgError, ValueError, RuntimeWarning):
+                    # Fallback to linear detrending
+                    if poly_degree > 1:
+                        coeffs = np.polyfit(x, ecg_processed, deg=1)
+                        ecg_processed -= np.polyval(coeffs, x)
+                    else:
+                        # Fallback to mean removal
+                        ecg_processed -= np.mean(ecg_processed)
+            except Exception:
+                # Final fallback: just remove mean
+                ecg_processed -= np.mean(ecg_processed)
 
         # --- Step 2: High-Pass Filter ---
         if highpass_cutoff is not None and filter_order is not None:

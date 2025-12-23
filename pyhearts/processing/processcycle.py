@@ -4,6 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 from scipy.optimize import curve_fit
+from scipy.signal import butter, filtfilt
 
 
 # Custom imports for PyHEARTS
@@ -14,7 +15,7 @@ from pyhearts.plots import plot_fit, plot_labeled_peaks, plot_rise_decay
 from .bounds import calc_bounds, calc_bounds_skewed
 from .detrend import detrend_signal
 from .gaussian import compute_gauss_std, gaussian_function, skewed_gaussian_function
-from .peaks import find_peaks
+from .peaks import find_peaks, find_peak_derivative_based, refine_peak_parabolic
 from .validation import (
     validate_peaks,
     validate_cycle_physiology,
@@ -23,6 +24,56 @@ from .validation import (
 )
 from .waveletoffset import calc_wavelet_dynamic_offset
 from .snrgate import gate_by_local_mad
+
+
+def bandpass_filter_pwave(
+    signal: np.ndarray,
+    sampling_rate: float,
+    lowcut: float = 5.0,
+    highcut: float = 15.0,
+    order: int = 4,
+) -> np.ndarray:
+    """
+    Apply band-pass filter for P-wave detection.
+    
+    Enhances P-wave visibility by filtering in the 5-15 Hz range, which:
+    - Removes low-frequency baseline wander (<5 Hz)
+    - Removes high-frequency noise (>15 Hz)
+    - Preserves P-wave morphology
+    
+    Parameters
+    ----------
+    signal : np.ndarray
+        Input ECG signal.
+    sampling_rate : float
+        Sampling rate in Hz.
+    lowcut : float
+        Low cutoff frequency in Hz (default 5.0).
+    highcut : float
+        High cutoff frequency in Hz (default 15.0).
+    order : int
+        Filter order (default 4).
+    
+    Returns
+    -------
+    np.ndarray
+        Band-pass filtered signal.
+    """
+    nyq = sampling_rate / 2.0
+    low = lowcut / nyq
+    high = highcut / nyq
+    
+    # Ensure cutoffs are valid
+    low = max(0.01, min(low, 0.99))
+    high = max(low + 0.01, min(high, 0.99))
+    
+    try:
+        b, a = butter(order, [low, high], btype='band')
+        filtered = filtfilt(b, a, signal)
+        return filtered
+    except Exception:
+        # Fallback: return original signal if filtering fails
+        return signal
 
 
 def process_cycle(
@@ -37,6 +88,7 @@ def process_cycle(
     plot=False,
     verbose=False,
     cfg: ProcessCycleConfig | None = None,
+    precomputed_peaks: dict | None = None,
 ):
 
     cfg = cfg or ProcessCycleConfig()  # safe default
@@ -166,7 +218,17 @@ def process_cycle(
                     )
                 }
             else:
-                new_gauss_center_idxs, new_gauss_heights, new_gauss_stdevs = new_gaussian_features_reshape.T
+                # When not using skewed, only extract first 3 columns (center, height, std)
+                # Handle case where reshape might have more columns than expected
+                if new_gaussian_features_reshape.shape[1] >= 3:
+                    new_gauss_center_idxs = new_gaussian_features_reshape[:, 0]
+                    new_gauss_heights = new_gaussian_features_reshape[:, 1]
+                    new_gauss_stdevs = new_gaussian_features_reshape[:, 2]
+                else:
+                    # Fallback if shape is unexpected
+                    new_gauss_center_idxs = new_gaussian_features_reshape[:, 0] if new_gaussian_features_reshape.shape[1] >= 1 else np.array([])
+                    new_gauss_heights = new_gaussian_features_reshape[:, 1] if new_gaussian_features_reshape.shape[1] >= 2 else np.array([])
+                    new_gauss_stdevs = new_gaussian_features_reshape[:, 2] if new_gaussian_features_reshape.shape[1] >= 3 else np.array([])
                 new_gauss_alphas = None
                 previous_gauss_features = {
                     comp: [center, height, std]
@@ -213,37 +275,17 @@ def process_cycle(
         
             gauss_center = new_gauss_center_idxs[i]
             center_val = new_gauss_center_idxs[i]
-            center_idx = int(np.round(center_val)) if np.isfinite(center_val) else None
+            gauss_center_idx = int(np.round(center_val)) if np.isfinite(center_val) else None
 
-            # Detecting peak center voltage value within detected peak window 
-            from math import sqrt, log
-
-            # s = per-peak sigma in samples (already computed as new_gauss_stdevs[i])
-            s = float(stdevs_arr[i]) if (stdevs_arr is not None and i < stdevs_arr.size) else float("nan")
-            
-            if center_idx is not None and np.isfinite(s) and s > 0:
-                # Use half-FWHM as search window, but ensure minimum width for better peak finding
-                half = max(5, int(round(s * sqrt(2.0 * log(2.0)))))  # half-FWHM in samples, min 5
-                # Cap window size to avoid too wide search (max 20 samples each side)
-                half = min(half, 20)
-                left  = max(center_idx - half, 0)
-                right = min(center_idx + half + 1, len(sig_detrended))
-                window = sig_detrended[left:right]
-            
-                if comp in ("P", "R", "T"):                      # positive waves
-                    local_ext_idx = int(np.argmax(window))
-                elif comp in ("Q", "S"):                         # negative waves
-                    local_ext_idx = int(np.argmin(window))
-                else:                                            # fallback: strongest magnitude
-                    local_ext_idx = int(np.argmax(np.abs(window)))
-            
-                corrected_center = left + local_ext_idx
-                if corrected_center != center_idx and verbose:
-                    print(f"[Cycle {cycle_idx}]: {comp} center adjusted from {center_idx} to {corrected_center} (window={half*2+1})")
-                center_idx = corrected_center
-            else: 
-                if verbose:
-                    print(f"[Cycle {cycle_idx}]: {comp} σ invalid/missing; keeping center at {center_idx} (no refinement)")
+            # For timing accuracy: use original detected peak position instead of Gaussian-refined center
+            # This avoids timing bias from Gaussian fitting while keeping Gaussian params for morphology
+            # For P-waves especially, this improves timing accuracy
+            # Note: original_peak_indices only available in full estimation path, not fast path with previous_gauss_features
+            if 'original_peak_indices' in locals() and comp in original_peak_indices:
+                center_idx = original_peak_indices[comp]  # Use original peak for timing
+            else:
+                # Fallback: use Gaussian center (fast path or component not in original_peak_indices)
+                center_idx = gauss_center_idx
 
             global_center_idx = (
                 int(xs_samples[center_idx]) if center_idx is not None and center_idx < len(xs_samples) else None
@@ -290,6 +332,55 @@ def process_cycle(
 
         # Directly assign gauss_idxs as peak_data (structure now matches)
         peak_data = gauss_idxs.copy()
+        
+        # Add precomputed T/P waves to peak_data if they weren't in Gaussian fit
+        # This ensures precomputed peaks are preserved even if Gaussian fitting failed
+        if precomputed_peaks is not None and cycle_idx in precomputed_peaks:
+            cycle_start_global = int(one_cycle["signal_x"].iloc[0]) if not one_cycle.empty else 0
+            
+            # Handle T-wave
+            if "T" not in peak_data:
+                t_annotation = precomputed_peaks[cycle_idx].get('T')
+                if t_annotation is not None:
+                    # Convert global index to cycle-relative for center_idx
+                    t_center_idx_rel = t_annotation.peak_idx - cycle_start_global
+                    if 0 <= t_center_idx_rel < len(sig_detrended):
+                        peak_data["T"] = {
+                            "global_center_idx": t_annotation.peak_idx,
+                            "center_idx": t_center_idx_rel,
+                            "gauss_center": None,
+                            "gauss_height": t_annotation.peak_amplitude,
+                            "gauss_stdev_samples": None,
+                            "gauss_fwhm_samples": None,
+                            "gauss_stdev_ms": None,
+                            "gauss_fwhm_ms": None,
+                        }
+                        # Add onset/offset if available
+                        if t_annotation.onset_idx is not None:
+                            peak_data["T"]["le_idx"] = t_annotation.onset_idx - cycle_start_global
+                        if t_annotation.offset_idx is not None:
+                            peak_data["T"]["ri_idx"] = t_annotation.offset_idx - cycle_start_global
+            
+            # Handle P-wave
+            if "P" not in peak_data:
+                p_annotation = precomputed_peaks[cycle_idx].get('P')
+                if p_annotation is not None:
+                    p_center_idx_rel = p_annotation.peak_idx - cycle_start_global
+                    if 0 <= p_center_idx_rel < len(sig_detrended):
+                        peak_data["P"] = {
+                            "global_center_idx": p_annotation.peak_idx,
+                            "center_idx": p_center_idx_rel,
+                            "gauss_center": None,
+                            "gauss_height": p_annotation.peak_amplitude,
+                            "gauss_stdev_samples": None,
+                            "gauss_fwhm_samples": None,
+                            "gauss_stdev_ms": None,
+                            "gauss_fwhm_ms": None,
+                        }
+                        if p_annotation.onset_idx is not None:
+                            peak_data["P"]["le_idx"] = p_annotation.onset_idx - cycle_start_global
+                        if p_annotation.offset_idx is not None:
+                            peak_data["P"]["ri_idx"] = p_annotation.offset_idx - cycle_start_global
 
         # if plot:
         #     plot_labeled_peaks(
@@ -335,7 +426,7 @@ def process_cycle(
         if r_center_idx is None:
             if verbose:
                 print(f"[Cycle {cycle_idx}]: Error -  R peak not detected — skipping cycle.")
-            return None  # or return {}, [], whatever your pipeline expects
+            return output_dict, previous_r_global_center_idx, previous_p_global_center_idx, None, previous_gauss_features
 
         if r_std is None:
             if verbose:
@@ -379,13 +470,50 @@ def process_cycle(
             print(f"[Cycle {cycle_idx}]: Q peak rejected — not included in fit.")
 
         # --- P Peak ---
-        p_peak_end_idx = q_center_idx if q_center_idx is not None else r_center_idx        
-        if p_peak_end_idx is None or p_peak_end_idx < 2:
-            if verbose:
-                print(f"[Cycle {cycle_idx}]: Cannot search for P peak — missing Q/R bounds.")
-            p_center_idx, p_height = None, None
-        else:
-            pre_qrs_len = int(p_peak_end_idx)
+        # Check if precomputed peaks are available
+        p_center_idx, p_height = None, None
+        p_onset_idx, p_offset_idx = None, None
+        
+        if precomputed_peaks is not None and cycle_idx in precomputed_peaks:
+            p_annotation = precomputed_peaks[cycle_idx].get('P')
+            if p_annotation is not None:
+                # Use precomputed P-wave annotation
+                # Map from global signal indices to cycle-relative indices
+                cycle_start_global = int(one_cycle["signal_x"].iloc[0])
+                cycle_end_global = int(one_cycle["signal_x"].iloc[-1])
+                cycle_length = len(one_cycle)
+                
+                # Check if peak is within cycle boundaries
+                if cycle_start_global <= p_annotation.peak_idx <= cycle_end_global:
+                    p_center_idx = p_annotation.peak_idx - cycle_start_global
+                    # Ensure index is within cycle array bounds
+                    if 0 <= p_center_idx < cycle_length:
+                        p_height = p_annotation.peak_amplitude
+                        if p_annotation.onset_idx is not None and cycle_start_global <= p_annotation.onset_idx <= cycle_end_global:
+                            p_onset_idx = p_annotation.onset_idx - cycle_start_global
+                            p_onset_idx = max(0, min(p_onset_idx, cycle_length - 1))
+                        if p_annotation.offset_idx is not None and cycle_start_global <= p_annotation.offset_idx <= cycle_end_global:
+                            p_offset_idx = p_annotation.offset_idx - cycle_start_global
+                            p_offset_idx = max(0, min(p_offset_idx, cycle_length - 1))
+                        
+                        if verbose:
+                            print(f"[Cycle {cycle_idx}]: Using precomputed P-wave at global idx {p_annotation.peak_idx} (cycle-relative: {p_center_idx})")
+                    else:
+                        # Peak outside cycle array bounds, skip precomputed detection
+                        p_center_idx = None
+                else:
+                    # Peak outside cycle boundaries, skip precomputed detection
+                    p_center_idx = None
+        
+        # If precomputed peaks didn't provide a P-wave, use standard detection
+        if p_center_idx is None:
+            p_peak_end_idx = q_center_idx if q_center_idx is not None else r_center_idx        
+            if p_peak_end_idx is None or p_peak_end_idx < 2:
+                if verbose:
+                    print(f"[Cycle {cycle_idx}]: Cannot search for P peak — missing Q/R bounds.")
+                p_center_idx, p_height = None, None
+            else:
+                pre_qrs_len = int(p_peak_end_idx)
         
             # Narrow P-wave search window: search in the last 120ms before QRS (reduced from full pre-QRS)
             # This prevents detecting noise or artifacts far from the QRS complex
@@ -398,37 +526,212 @@ def process_cycle(
                     print(f"[Cycle {cycle_idx}]: P window too small (start={start_idx}, end={pre_qrs_len}).")
                 p_center_idx, p_height = None, None
             else:
-                # Candidate by extremum before QRS (assume P positive)
-                p_center_idx, p_height, _ = find_peaks(
-                    signal=sig_detrended,
-                    xs=xs_rel_idxs,
-                    start_idx=start_idx,
-                    end_idx=pre_qrs_len,
-                    mode="max",
-                    verbose=verbose,
-                    label="P",
-                    cycle_idx=cycle_idx,
-                )
-
-                # --- P SNR gate ---
-                if p_center_idx is not None:
-                    seg = sig_detrended[start_idx:pre_qrs_len]
-                    keep, rel_idx, p_h = gate_by_local_mad(
-                        seg, sampling_rate,
-                        comp="P",
-                        cand_rel_idx=p_center_idx - start_idx,  # we already localized P
-                        expected_polarity="positive",
-                        cfg=cfg,
-                        baseline_mode="rolling",
-                    )
-                    if keep:
-                        p_center_idx = start_idx + rel_idx
-                        p_height = p_h
-                    else:
-                        p_center_idx, p_height = None, None
+                # Apply band-pass filter for P-wave detection
+                # This enhances P-wave visibility while preserving morphology
+                # Step 3: Add fallback to unfiltered signal if band-pass fails
+                p_center_idx, p_height = None, None
                 
-
-
+                if cfg.pwave_use_bandpass:
+                    # Filter a larger segment to avoid edge artifacts, then extract the original window
+                    # Edge artifacts occur when filtering short segments, so we pad the segment
+                    filter_padding_ms = 50  # Extra samples on each side to avoid edge artifacts
+                    filter_padding_samples = int(round(filter_padding_ms * sampling_rate / 1000.0))
+                    filter_start = max(0, start_idx - filter_padding_samples)
+                    filter_end = min(len(sig_detrended), pre_qrs_len + filter_padding_samples)
+                    
+                    # Filter larger segment
+                    p_search_segment_large = sig_detrended[filter_start:filter_end]
+                    
+                    if len(p_search_segment_large) >= 10:
+                        # Apply band-pass filter to larger segment
+                        p_search_filtered_large = bandpass_filter_pwave(
+                            p_search_segment_large,
+                            sampling_rate,
+                            lowcut=cfg.pwave_bandpass_low_hz,
+                            highcut=cfg.pwave_bandpass_high_hz,
+                            order=cfg.pwave_bandpass_order,
+                        )
+                        
+                        # Extract original window from filtered segment (ignore edge padding)
+                        edge_ignore_start = filter_padding_samples
+                        edge_ignore_end = len(p_search_filtered_large) - filter_padding_samples
+                        if edge_ignore_end > edge_ignore_start:
+                            p_search_filtered = p_search_filtered_large[edge_ignore_start:edge_ignore_end]
+                        else:
+                            p_search_filtered = p_search_filtered_large
+                        
+                        # Map back to full signal indices for find_peaks
+                        sig_for_p_detection = sig_detrended.copy()
+                        sig_for_p_detection[start_idx:pre_qrs_len] = p_search_filtered
+                        
+                        # Try finding P-wave in filtered signal
+                        # Step 5: Try both positive and negative P-waves (inverted leads)
+                        p_center_idx, p_height = None, None
+                        
+                        # First try positive P-wave (normal)
+                        # Use derivative-based detection for better accuracy
+                        p_center_idx_pos, p_height_pos, _ = find_peaks(
+                            signal=sig_for_p_detection,
+                            xs=xs_rel_idxs,
+                            start_idx=start_idx,
+                            end_idx=pre_qrs_len,
+                            mode="max",
+                            verbose=verbose,
+                            label="P",
+                            cycle_idx=cycle_idx,
+                            use_derivative=True,  # Use derivative-based detection
+                        )
+                        
+                        # Also try negative P-wave (inverted lead)
+                        p_center_idx_neg, p_height_neg, _ = find_peaks(
+                            signal=sig_for_p_detection,
+                            xs=xs_rel_idxs,
+                            start_idx=start_idx,
+                            end_idx=pre_qrs_len,
+                            mode="min",
+                            verbose=verbose,
+                            label="P",
+                            cycle_idx=cycle_idx,
+                            use_derivative=True,  # Use derivative-based detection
+                        )
+                        
+                        # Choose the one with larger absolute amplitude
+                        if p_center_idx_pos is not None and p_center_idx_neg is not None:
+                            if abs(p_height_pos) >= abs(p_height_neg):
+                                p_center_idx, p_height = p_center_idx_pos, p_height_pos
+                            else:
+                                p_center_idx, p_height = p_center_idx_neg, p_height_neg
+                        elif p_center_idx_pos is not None:
+                            p_center_idx, p_height = p_center_idx_pos, p_height_pos
+                        elif p_center_idx_neg is not None:
+                            p_center_idx, p_height = p_center_idx_neg, p_height_neg
+                        
+                        # If found, check SNR gate
+                        # Step 5: Determine polarity from detected P-wave
+                        if p_center_idx is not None:
+                            # Store original detected position BEFORE SNR gate (for accurate timing)
+                            p_center_idx_detected = p_center_idx
+                            
+                            seg = sig_detrended[start_idx:pre_qrs_len]
+                            # Determine expected polarity from detected P-wave
+                            p_detected_value = seg[p_center_idx - start_idx] if (p_center_idx - start_idx) < len(seg) else seg[0]
+                            expected_polarity = "positive" if p_detected_value >= 0 else "negative"
+                            
+                            keep, rel_idx, p_h = gate_by_local_mad(
+                                seg, sampling_rate,
+                                comp="P",
+                                cand_rel_idx=p_center_idx - start_idx,
+                                expected_polarity=expected_polarity,  # Use detected polarity
+                                cfg=cfg,
+                                baseline_mode="rolling",
+                            )
+                            if keep:
+                                # Use original detected position for timing (SNR gate only validates, doesn't refine position for P)
+                                p_center_idx = p_center_idx_detected
+                                p_height = p_h
+                                
+                                # Refine peak position in unfiltered signal to avoid filter phase shifts
+                                # Use larger window and derivative-based detection for better accuracy
+                                refine_window_samples = int(round(40 * sampling_rate / 1000.0))  # ±40ms window for better phase shift correction
+                                refine_start = max(0, p_center_idx - refine_window_samples)
+                                refine_end = min(len(sig_detrended), p_center_idx + refine_window_samples + 1)
+                                if refine_end > refine_start:
+                                    # Use derivative-based peak finding in unfiltered signal (more accurate)
+                                    p_center_idx_refined, p_height_refined = find_peak_derivative_based(
+                                        sig_detrended, refine_start, refine_end, expected_polarity, verbose, "P", cycle_idx
+                                    )
+                                    if p_center_idx_refined is not None:
+                                        # Apply parabolic interpolation for sub-sample accuracy
+                                        refined_subsample = refine_peak_parabolic(sig_detrended, p_center_idx_refined)
+                                        p_center_idx_refined = int(np.round(refined_subsample))
+                                        p_center_idx_refined = np.clip(p_center_idx_refined, 0, len(sig_detrended) - 1)
+                                        p_height_refined = sig_detrended[p_center_idx_refined]
+                                        
+                                        if verbose and abs(p_center_idx_refined - p_center_idx) > 2:
+                                            print(f"[Cycle {cycle_idx}]: P peak refined from filtered position {p_center_idx} to unfiltered position {p_center_idx_refined} (offset: {p_center_idx_refined - p_center_idx} samples)")
+                                        p_center_idx = p_center_idx_refined
+                                        p_height = p_height_refined
+                                    # If derivative method fails, fallback to simple argmax/argmin
+                                    elif refine_end - refine_start >= 3:
+                                        refine_seg = sig_detrended[refine_start:refine_end]
+                                        if expected_polarity == "positive":
+                                            refine_local_idx = int(np.argmax(refine_seg))
+                                        else:
+                                            refine_local_idx = int(np.argmin(refine_seg))
+                                        p_center_idx_refined = refine_start + refine_local_idx
+                                        p_center_idx = p_center_idx_refined
+                                        p_height = sig_detrended[p_center_idx]
+                            else:
+                                p_center_idx, p_height = None, None
+                
+                # Fallback: if band-pass failed or not enabled, try unfiltered signal
+                if p_center_idx is None:
+                    sig_for_p_detection = sig_detrended
+                    
+                    # Try both positive and negative P-waves
+                    # Use derivative-based detection for better accuracy
+                    p_center_idx_pos, p_height_pos, _ = find_peaks(
+                        signal=sig_for_p_detection,
+                        xs=xs_rel_idxs,
+                        start_idx=start_idx,
+                        end_idx=pre_qrs_len,
+                        mode="max",
+                        verbose=verbose,
+                        label="P",
+                        cycle_idx=cycle_idx,
+                        use_derivative=True,  # Use derivative-based detection
+                    )
+                    
+                    p_center_idx_neg, p_height_neg, _ = find_peaks(
+                        signal=sig_for_p_detection,
+                        xs=xs_rel_idxs,
+                        start_idx=start_idx,
+                        end_idx=pre_qrs_len,
+                        mode="min",
+                        verbose=verbose,
+                        label="P",
+                        cycle_idx=cycle_idx,
+                        use_derivative=True,  # Use derivative-based detection
+                    )
+                    
+                    # Choose the one with larger absolute amplitude
+                    if p_center_idx_pos is not None and p_center_idx_neg is not None:
+                        if abs(p_height_pos) >= abs(p_height_neg):
+                            p_center_idx, p_height = p_center_idx_pos, p_height_pos
+                        else:
+                            p_center_idx, p_height = p_center_idx_neg, p_height_neg
+                    elif p_center_idx_pos is not None:
+                        p_center_idx, p_height = p_center_idx_pos, p_height_pos
+                    elif p_center_idx_neg is not None:
+                        p_center_idx, p_height = p_center_idx_neg, p_height_neg
+                    
+                    # Check SNR gate for unfiltered detection
+                    # Step 5: Determine polarity from detected P-wave
+                    if p_center_idx is not None:
+                        # Store original detected position BEFORE SNR gate (for accurate timing)
+                        p_center_idx_detected = p_center_idx
+                        
+                        seg = sig_detrended[start_idx:pre_qrs_len]
+                        # Determine expected polarity from detected P-wave
+                        p_detected_value = seg[p_center_idx - start_idx] if (p_center_idx - start_idx) < len(seg) else seg[0]
+                        expected_polarity = "positive" if p_detected_value >= 0 else "negative"
+                        
+                        keep, rel_idx, p_h = gate_by_local_mad(
+                            seg, sampling_rate,
+                            comp="P",
+                            cand_rel_idx=p_center_idx - start_idx,
+                            expected_polarity=expected_polarity,  # Use detected polarity
+                            cfg=cfg,
+                            baseline_mode="rolling",
+                        )
+                        if keep:
+                            # Use original detected position for timing (SNR gate only validates, doesn't refine position for P)
+                            p_center_idx = p_center_idx_detected
+                            p_height = p_h
+                            # For unfiltered detection, peak is already in unfiltered signal (no refinement needed)
+                        else:
+                            p_center_idx, p_height = None, None
+                
         
         if p_center_idx is None and verbose:
             print(f"[Cycle {cycle_idx}]: P peak rejected — not included in fit.")
@@ -455,47 +758,144 @@ def process_cycle(
             print(f"[Cycle {cycle_idx}]: S peak rejected — not included in fit.")
 
         # # --- T Peak ---
+        # Check if precomputed peaks are available
         t_center_idx, t_height = None, None
+        t_onset_idx, t_offset_idx = None, None
         
-        t_region_start = s_center_idx if s_center_idx is not None else r_center_idx
-        if t_region_start is None or t_region_start >= len(sig_detrended) - 2:
-            if verbose:
-                print(f"[Cycle {cycle_idx}]: Cannot search for T — missing S/R bounds.")
-        else:
-            n = len(sig_detrended)
-        
-            # 1) Lightweight guards
-            gap = int(round(cfg.postQRS_refractory_window_ms * sampling_rate / 1000.0))
-            
-            # wavelet-derived guard (from calc_wavelet_dynamic_offset), then cap via config
-            post_qrs_guard = int(offset_samples) if "offset_samples" in locals() else 0
-            cap_samples    = int(round(cfg.wavelet_guard_cap_ms * sampling_rate / 1000.0))
-            post_qrs_guard = max(0, min(post_qrs_guard, cap_samples))
-            
-            t_start_idx = min(max(int(t_region_start) + 1 + max(gap, post_qrs_guard), 0), n - 2)
-            t_end_idx   = max(
-                t_start_idx + 2,
-                n - int(round((cfg.detrend_window_ms / 2.0) * sampling_rate / 1000.0)),
-            )
-
-            if t_end_idx - t_start_idx < 3:
-                if verbose:
-                    print(f"[Cycle {cycle_idx}]: T window too small (start={t_start_idx}, end={t_end_idx}).")
-            else:
-                # T gate
-                seg = sig_detrended[t_start_idx:t_end_idx]
-                keep, rel_idx, t_h = gate_by_local_mad(
-                    seg, sampling_rate,
-                    comp="T",
-                    expected_polarity="positive",
-                    cfg=cfg,
-                    baseline_mode="median",
-                )
-                if keep:
-                    t_center_idx = t_start_idx + rel_idx
-                    t_height = t_h
+        if precomputed_peaks is not None and cycle_idx in precomputed_peaks:
+            t_annotation = precomputed_peaks[cycle_idx].get('T')
+            if t_annotation is not None:
+                # Use precomputed T-wave annotation
+                # Map from global signal indices to cycle-relative indices
+                cycle_start_global = int(one_cycle["signal_x"].iloc[0])
+                cycle_end_global = int(one_cycle["signal_x"].iloc[-1])
+                cycle_length = len(one_cycle)
+                
+                # Check if peak is within cycle boundaries
+                if cycle_start_global <= t_annotation.peak_idx <= cycle_end_global:
+                    t_center_idx = t_annotation.peak_idx - cycle_start_global
+                    # Ensure index is within cycle array bounds
+                    if 0 <= t_center_idx < cycle_length:
+                        t_height = t_annotation.peak_amplitude
+                        if t_annotation.onset_idx is not None and cycle_start_global <= t_annotation.onset_idx <= cycle_end_global:
+                            t_onset_idx = t_annotation.onset_idx - cycle_start_global
+                            t_onset_idx = max(0, min(t_onset_idx, cycle_length - 1))
+                        if t_annotation.offset_idx is not None and cycle_start_global <= t_annotation.offset_idx <= cycle_end_global:
+                            t_offset_idx = t_annotation.offset_idx - cycle_start_global
+                            t_offset_idx = max(0, min(t_offset_idx, cycle_length - 1))
+                        
+                        if verbose:
+                            print(f"[Cycle {cycle_idx}]: Using precomputed T-wave at global idx {t_annotation.peak_idx} (cycle-relative: {t_center_idx})")
+                    else:
+                        # Peak outside cycle array bounds, skip precomputed detection
+                        t_center_idx = None
                 else:
-                    t_center_idx, t_height = None, None
+                    # Peak outside cycle boundaries, skip precomputed detection
+                    t_center_idx = None
+        
+        # If precomputed peaks didn't provide a T-wave, use derivative-based detection
+        if t_center_idx is None:
+            t_region_start = s_center_idx if s_center_idx is not None else r_center_idx
+            if t_region_start is None or t_region_start >= len(sig_detrended) - 2:
+                if verbose:
+                    print(f"[Cycle {cycle_idx}]: Cannot search for T — missing S/R bounds.")
+            else:
+                n = len(sig_detrended)
+            
+                # 1) Lightweight guards
+                gap = int(round(cfg.postQRS_refractory_window_ms * sampling_rate / 1000.0))
+                
+                # wavelet-derived guard (from calc_wavelet_dynamic_offset), then cap via config
+                post_qrs_guard = int(offset_samples) if "offset_samples" in locals() else 0
+                cap_samples    = int(round(cfg.wavelet_guard_cap_ms * sampling_rate / 1000.0))
+                post_qrs_guard = max(0, min(post_qrs_guard, cap_samples))
+                
+                t_start_idx = min(max(int(t_region_start) + 1 + max(gap, post_qrs_guard), 0), n - 2)
+                t_end_idx   = max(
+                    t_start_idx + 2,
+                    n - int(round((cfg.detrend_window_ms / 2.0) * sampling_rate / 1000.0)),
+                )
+
+                if t_end_idx - t_start_idx < 3:
+                    if verbose:
+                        print(f"[Cycle {cycle_idx}]: T window too small (start={t_start_idx}, end={t_end_idx}).")
+                else:
+                    # Derivative-based T-wave detection: band-pass filter + derivative-based detection
+                    # Apply band-pass filter (5-15 Hz) for T-wave detection
+                    t_search_segment = sig_detrended[t_start_idx:t_end_idx]
+                    t_search_filtered = bandpass_filter_pwave(
+                        t_search_segment, sampling_rate, lowcut=5.0, highcut=15.0, order=4
+                    )
+                    
+                    # Map back to full signal indices for detection
+                    sig_for_t_detection = sig_detrended.copy()
+                    sig_for_t_detection[t_start_idx:t_end_idx] = t_search_filtered
+                    
+                    # Use derivative-based detection for better accuracy
+                    # Try both positive and negative T-waves
+                    # Create xs array matching signal length for find_peaks
+                    xs_for_t_detection = np.arange(len(sig_for_t_detection))
+                    
+                    t_center_idx_pos, t_height_pos, _ = find_peaks(
+                        signal=sig_for_t_detection,
+                        xs=xs_for_t_detection,
+                        start_idx=t_start_idx,
+                        end_idx=t_end_idx,
+                        mode="max",  # Positive T-wave
+                        verbose=verbose,
+                        label="T",
+                        cycle_idx=cycle_idx,
+                        use_derivative=True,  # Use derivative-based detection
+                    )
+                    t_center_idx_neg, t_height_neg, _ = find_peaks(
+                        signal=sig_for_t_detection,
+                        xs=xs_for_t_detection,
+                        start_idx=t_start_idx,
+                        end_idx=t_end_idx,
+                        mode="min",  # Negative T-wave
+                        verbose=verbose,
+                        label="T",
+                        cycle_idx=cycle_idx,
+                        use_derivative=True,  # Use derivative-based detection
+                    )
+                    
+                    # Choose the one with larger absolute amplitude
+                    if t_center_idx_pos is not None and t_center_idx_neg is not None:
+                        if abs(t_height_pos) >= abs(t_height_neg):
+                            t_center_idx, t_height = t_center_idx_pos, t_height_pos
+                        else:
+                            t_center_idx, t_height = t_center_idx_neg, t_height_neg
+                    elif t_center_idx_pos is not None:
+                        t_center_idx, t_height = t_center_idx_pos, t_height_pos
+                    elif t_center_idx_neg is not None:
+                        t_center_idx, t_height = t_center_idx_neg, t_height_neg
+                    else:
+                        t_center_idx, t_height = None, None
+                    
+                    # Validate with SNR gate (if enabled)
+                    if t_center_idx is not None:
+                        # Store original detected position BEFORE SNR gate (for accurate timing)
+                        t_center_idx_detected = t_center_idx
+                        
+                        # Get signal value at detected position for polarity check
+                        seg = sig_detrended[t_start_idx:t_end_idx]
+                        t_detected_value = seg[t_center_idx - t_start_idx] if (t_center_idx - t_start_idx) < len(seg) else seg[0]
+                        expected_polarity = "positive" if t_detected_value >= 0 else "negative"
+                        
+                        # Apply SNR gate for validation
+                        keep, rel_idx, t_h = gate_by_local_mad(
+                            seg, sampling_rate,
+                            comp="T",
+                            expected_polarity=expected_polarity,  # Use detected polarity
+                            cfg=cfg,
+                            baseline_mode="median",
+                        )
+                        if keep:
+                            # Use original detected position for timing (SNR gate only validates, doesn't refine position for T)
+                            t_center_idx = t_center_idx_detected
+                            t_height = t_h
+                        else:
+                            t_center_idx, t_height = None, None
                         
         if t_center_idx is None and verbose:
             print(f"[Cycle {cycle_idx}]: T peak rejected — not included in fit.")
@@ -526,12 +926,15 @@ def process_cycle(
         # Build final guess dict (add R, filter invalid, keep verbose logging)
         components = {**validated, "R": (r_center_idx, r_height)}
         guess_idxs = {}
+        # Store original peak indices before Gaussian fitting (for accurate timing after fit)
+        original_peak_indices = {}
         for label, (center, height) in components.items():
             if center is None or height is None or not np.isfinite(height):
                 if verbose:
                     print(f"[Cycle {cycle_idx}]: Excluding {label} from Gaussian fit due to missing or invalid values.")
                 continue
             guess_idxs[label] = (int(center), float(height))
+            original_peak_indices[label] = int(center)  # Store original peak for timing accuracy
 
         # ------------------------------------------------------
         # Step 5: Compute Gaussian Guess features
@@ -656,7 +1059,17 @@ def process_cycle(
                     )
                 }
             else:
-                gauss_center_idxs, gauss_heights, gauss_stdevs = gaussian_features_reshape.T
+                # When not using skewed, only extract first 3 columns (center, height, std)
+                # Handle case where reshape might have more columns than expected
+                if gaussian_features_reshape.shape[1] >= 3:
+                    gauss_center_idxs = gaussian_features_reshape[:, 0]
+                    gauss_heights = gaussian_features_reshape[:, 1]
+                    gauss_stdevs = gaussian_features_reshape[:, 2]
+                else:
+                    # Fallback if shape is unexpected
+                    gauss_center_idxs = gaussian_features_reshape[:, 0] if gaussian_features_reshape.shape[1] >= 1 else np.array([])
+                    gauss_heights = gaussian_features_reshape[:, 1] if gaussian_features_reshape.shape[1] >= 2 else np.array([])
+                    gauss_stdevs = gaussian_features_reshape[:, 2] if gaussian_features_reshape.shape[1] >= 3 else np.array([])
                 gauss_alphas = None
                 previous_gauss_features = {
                     comp: [center, height, std]
@@ -705,38 +1118,20 @@ def process_cycle(
         
             # --- center index (discrete) ---
             c_val = centers_arr[i]
-            center_idx = int(np.round(c_val)) if np.isfinite(c_val) else None
-            corrected_center_idx = center_idx
-        
-            # refine local extremum within wider window to find true peak
-            # Use adaptive window based on Gaussian std if available, otherwise use fixed window
-            if center_idx is not None:
-                if stdevs_arr is not None and i < stdevs_arr.size:
-                    s = stdevs_arr[i]
-                    if np.isfinite(s) and s > 0:
-                        # Use half-FWHM as search window (more accurate for true peak)
-                        half_fwhm = max(5, int(round(s * np.sqrt(2.0 * np.log(2.0)))))
-                        window_half = min(half_fwhm, 20)  # Cap at 20 samples to avoid too wide
-                    else:
-                        window_half = 15  # Default wider window if std not available
-                else:
-                    window_half = 15  # Default wider window
-                
-                if window_half < center_idx < len(sig_detrended) - window_half:
-                    window = sig_detrended[center_idx - window_half : center_idx + window_half + 1]
-                    if comp in ("P", "R", "T"):
-                        local_ext_idx = int(np.argmax(window))
-                    elif comp in ("Q", "S"):
-                        local_ext_idx = int(np.argmin(window))
-                    else:
-                        local_ext_idx = window_half
-                    corrected_center_idx = center_idx - window_half + local_ext_idx
-                    if corrected_center_idx != center_idx and verbose:
-                        print(f"[Cycle {cycle_idx}]: {comp} center adjusted {center_idx} → {corrected_center_idx} (window={window_half*2+1})")
-                else:
-                    corrected_center_idx = center_idx
+            gauss_center_idx = int(np.round(c_val)) if np.isfinite(c_val) else None
+            
+            # For timing accuracy: use original detected peak position instead of Gaussian-refined center
+            # This avoids timing bias from Gaussian fitting while keeping Gaussian params for morphology
+            # For P-waves especially, this improves timing accuracy
+            if comp in original_peak_indices:
+                center_idx = original_peak_indices[comp]  # Use original peak for timing
+                if verbose and center_idx != gauss_center_idx:
+                    print(f"[Cycle {cycle_idx}]: {comp} timing using original peak {center_idx} (Gaussian center: {gauss_center_idx})")
             else:
-                corrected_center_idx = center_idx
+                # Fallback: use Gaussian center if original not available (shouldn't happen for components in fit)
+                center_idx = gauss_center_idx
+            
+            corrected_center_idx = center_idx  # Use original peak for timing, no post-fit refinement
         
             # map to global sample index (if available)
             global_center_idx = (
@@ -808,6 +1203,65 @@ def process_cycle(
             for comp, vals in gauss_idxs.items()
             if vals is not None
         }
+        
+        # Add precomputed T/P waves to peak_data if they weren't in Gaussian fit
+        # Also preserve precomputed onset/offset indices if available
+        if precomputed_peaks is not None and cycle_idx in precomputed_peaks:
+            cycle_start_global = int(one_cycle["signal_x"].iloc[0]) if not one_cycle.empty else 0
+            
+            # Handle T-wave
+            t_annotation = precomputed_peaks[cycle_idx].get('T')
+            if t_annotation is not None:
+                if "T" not in peak_data:
+                    # T-wave not in Gaussian fit, add it from precomputed
+                    t_center_idx_rel = t_annotation.peak_idx - cycle_start_global
+                    if 0 <= t_center_idx_rel < len(sig_detrended):
+                        peak_data["T"] = {
+                            "global_center_idx": t_annotation.peak_idx,
+                            "center_idx": t_center_idx_rel,
+                            "gauss_center": None,
+                            "gauss_height": t_annotation.peak_amplitude,
+                            "gauss_stdev_samples": None,
+                            "gauss_fwhm_samples": None,
+                            "gauss_stdev_ms": None,
+                            "gauss_fwhm_ms": None,
+                        }
+                # Add onset/offset indices from precomputed annotation
+                if "T" in peak_data:
+                    if t_annotation.onset_idx is not None:
+                        t_onset_idx_rel = t_annotation.onset_idx - cycle_start_global
+                        if 0 <= t_onset_idx_rel < len(sig_detrended):
+                            peak_data["T"]["le_idx"] = _safe_int(t_onset_idx_rel)
+                    if t_annotation.offset_idx is not None:
+                        t_offset_idx_rel = t_annotation.offset_idx - cycle_start_global
+                        if 0 <= t_offset_idx_rel < len(sig_detrended):
+                            peak_data["T"]["ri_idx"] = _safe_int(t_offset_idx_rel)
+            
+            # Handle P-wave
+            p_annotation = precomputed_peaks[cycle_idx].get('P')
+            if p_annotation is not None:
+                if "P" not in peak_data:
+                    p_center_idx_rel = p_annotation.peak_idx - cycle_start_global
+                    if 0 <= p_center_idx_rel < len(sig_detrended):
+                        peak_data["P"] = {
+                            "global_center_idx": p_annotation.peak_idx,
+                            "center_idx": p_center_idx_rel,
+                            "gauss_center": None,
+                            "gauss_height": p_annotation.peak_amplitude,
+                            "gauss_stdev_samples": None,
+                            "gauss_fwhm_samples": None,
+                            "gauss_stdev_ms": None,
+                            "gauss_fwhm_ms": None,
+                        }
+                if "P" in peak_data:
+                    if p_annotation.onset_idx is not None:
+                        p_onset_idx_rel = p_annotation.onset_idx - cycle_start_global
+                        if 0 <= p_onset_idx_rel < len(sig_detrended):
+                            peak_data["P"]["le_idx"] = _safe_int(p_onset_idx_rel)
+                    if p_annotation.offset_idx is not None:
+                        p_offset_idx_rel = p_annotation.offset_idx - cycle_start_global
+                        if 0 <= p_offset_idx_rel < len(sig_detrended):
+                            peak_data["P"]["ri_idx"] = _safe_int(p_offset_idx_rel)
 
         if plot:
             plot_labeled_peaks(xs_rel_idxs, sig_detrended, peak_data)
@@ -926,7 +1380,9 @@ def process_cycle(
         center_idx = peak_data[comp].get("center_idx", np.nan)
         le_idx     = peak_data[comp].get("le_idx", np.nan)
         ri_idx     = peak_data[comp].get("ri_idx", np.nan)
-    
+        gauss_center = peak_data[comp].get("gauss_center", np.nan)
+        gauss_fwhm_samples = peak_data[comp].get("gauss_fwhm_samples", np.nan)
+
         # Global center idx
         if center_idx is not None and not np.isnan(center_idx) and int(center_idx) < len(xs_samples):
             global_center_idx = xs_samples[int(center_idx)]
@@ -947,6 +1403,50 @@ def process_cycle(
         else:
             global_ri_idx = np.nan
         output_dict[f"{comp}_global_ri_idx"][cycle_idx] = global_ri_idx
+
+        # --- FWHM-based boundary indices (inner width around the Gaussian peak) ---
+        # These complement the derivative/threshold-based le/ri indices by providing
+        # a purely morphology-derived width (similar to classical FWHM).
+        fwhm_le_idx = np.nan
+        fwhm_ri_idx = np.nan
+        fwhm_le_ms = np.nan
+        fwhm_ri_ms = np.nan
+        fwhm_global_le_idx = np.nan
+        fwhm_global_ri_idx = np.nan
+
+        if (
+            gauss_center is not None
+            and gauss_fwhm_samples is not None
+            and not np.isnan(gauss_center)
+            and not np.isnan(gauss_fwhm_samples)
+        ):
+            half_width = float(gauss_fwhm_samples) / 2.0
+            # Local (cycle-relative) indices
+            left = int(round(gauss_center - half_width))
+            right = int(round(gauss_center + half_width))
+
+            # Clamp to valid range of xs_samples / sig_detrended
+            left = max(0, min(left, len(xs_samples) - 1))
+            right = max(0, min(right, len(xs_samples) - 1))
+
+            if right >= left:
+                fwhm_le_idx = float(left)
+                fwhm_ri_idx = float(right)
+                # Convert to ms using sampling_rate
+                fwhm_le_ms = (left / sampling_rate) * 1000.0
+                fwhm_ri_ms = (right / sampling_rate) * 1000.0
+
+                # Map to global sample indices via xs_samples
+                fwhm_global_le_idx = float(xs_samples[left])
+                fwhm_global_ri_idx = float(xs_samples[right])
+
+        # Store FWHM-based metrics into output_dict
+        output_dict[f"{comp}_fwhm_le_idx"][cycle_idx] = fwhm_le_idx
+        output_dict[f"{comp}_fwhm_ri_idx"][cycle_idx] = fwhm_ri_idx
+        output_dict[f"{comp}_fwhm_le_ms"][cycle_idx] = fwhm_le_ms
+        output_dict[f"{comp}_fwhm_ri_ms"][cycle_idx] = fwhm_ri_ms
+        output_dict[f"{comp}_fwhm_global_le_idx"][cycle_idx] = fwhm_global_le_idx
+        output_dict[f"{comp}_fwhm_global_ri_idx"][cycle_idx] = fwhm_global_ri_idx
 
 
         # Center voltage

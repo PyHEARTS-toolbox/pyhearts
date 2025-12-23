@@ -115,12 +115,8 @@ cython_debug/
 # results/
 
 # Benchmark test data (large files - regenerate with generate_test_data.py)
-benchmark/test_data/
-benchmark/test_data_full/
+# Note: benchmark/ is now in dev/ which is ignored
 *.npy
-
-# Keep benchmark results for tracking
-!benchmark/results/*.csv
 
 # Worst performing records data and analysis (non-toolbox - data files and diagnostic scripts)
 worst_5_records_raw_data/
@@ -166,4 +162,7 @@ selected_leads.csv
 # Build artifacts
 pyhearts.egg-info/
 *.egg-info/
+
+# Development and non-essential files (benchmarks, analysis, external tools)
+dev/
 

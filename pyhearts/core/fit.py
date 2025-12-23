@@ -21,6 +21,7 @@ from pyhearts.processing import (
     process_cycle,
     r_peak_detection,
 )
+from pyhearts.processing.derivative_peak_detection import DerivativeBasedPeakDetector
 
 class PyHEARTS:
     """
@@ -239,7 +240,7 @@ class PyHEARTS:
             pairwise_differences=pairwise_differences,
         )
 
-    def process_cycle_wrapper(self, one_cycle: pd.DataFrame, cycle_idx: int):
+    def process_cycle_wrapper(self, one_cycle: pd.DataFrame, cycle_idx: int, precomputed_peaks: dict | None = None):
         """
         Process and extract features from a single ECG cycle.
     
@@ -276,7 +277,8 @@ class PyHEARTS:
             expected_max_energy=self.expected_max_energy,
             plot=self.plot,
             verbose=self.verbose,
-            cfg=self.cfg,   
+            cfg=self.cfg,
+            precomputed_peaks=precomputed_peaks,
         )
 
 
@@ -356,14 +358,34 @@ class PyHEARTS:
                 # Continue anyway but log the warning
                 # (Don't fail completely - let user decide)
             
-            filtered_r_peaks = r_peak_detection(
-                ecg_signal, 
-                self.sampling_rate, 
-                cfg=self.cfg,
-                plot=self.plot,
-                sensitivity=self.sensitivity,
-                raw_ecg=raw_ecg,
-            )
+            # Use requested R-peak detector
+            if self.cfg.rpeak_method == "pan_tompkins":
+                from pyhearts.processing.pan_tompkins import pan_tompkins_r_peak_detection
+                filtered_r_peaks = pan_tompkins_r_peak_detection(
+                    ecg_signal,
+                    self.sampling_rate,
+                    cfg=self.cfg,
+                    plot=self.plot,
+                    raw_ecg=raw_ecg,
+                )
+            elif self.cfg.rpeak_method == "bandpass_energy":
+                from pyhearts.processing.bandpass_energy_rpeak import bandpass_energy_r_peak_detection
+                filtered_r_peaks = bandpass_energy_r_peak_detection(
+                    ecg_signal,
+                    self.sampling_rate,
+                    cfg=self.cfg,
+                    plot=self.plot,
+                    raw_ecg=raw_ecg,
+                )
+            else:
+                filtered_r_peaks = r_peak_detection(
+                    ecg_signal, 
+                    self.sampling_rate, 
+                    cfg=self.cfg,
+                    plot=self.plot,
+                    sensitivity=self.sensitivity,
+                    raw_ecg=raw_ecg,
+                )
             self.r_peak_indices = filtered_r_peaks
         
             # Handle no R-peaks case
@@ -388,39 +410,98 @@ class PyHEARTS:
             self.epochs_df = epochs_df
             self.expected_max_energy = expected_max_energy
             
+            # Use the actual cycle labels from epochs_df (sorted for determinism)
+            cycles = np.sort(epochs_df["cycle"].unique())
+            
+            # Derivative-based detection (if enabled)
+            precomputed_peaks = None
+            if self.cfg.use_derivative_based_detection:
+                if self.verbose:
+                    logging.info("Using derivative-based peak detection (full-signal filtering, derivative-based)")
+                detector = DerivativeBasedPeakDetector(self.sampling_rate, self.cfg)
+                precomputed_peaks_by_rpeak = detector.detect_all_peaks(ecg_signal, filtered_r_peaks)
+                if self.verbose:
+                    p_count = sum(1 for v in precomputed_peaks_by_rpeak.values() if v.get('P') is not None)
+                    t_count = sum(1 for v in precomputed_peaks_by_rpeak.values() if v.get('T') is not None)
+                    logging.info(f"Derivative-based detection: {p_count} P-waves, {t_count} T-waves detected")
+                
+                # Map precomputed peaks from R-peak indices to cycle indices
+                # Detector uses R-peak array indices, but cycles may be filtered
+                # Create mapping: cycle_idx -> precomputed peaks based on R-peak location
+                precomputed_peaks = {}
+                if len(cycles) > 0:
+                    for cycle_idx, cycle_label in enumerate(cycles):
+                        one_cycle = epochs_df.loc[epochs_df["cycle"] == cycle_label]
+                        if not one_cycle.empty:
+                            # Get cycle time range from index column (global sample indices)
+                            # signal_x contains relative time values, not sample indices
+                            if "index" in one_cycle.columns:
+                                cycle_indices = one_cycle["index"].values
+                            else:
+                                # Fallback: try to use signal_x if index not available
+                                cycle_indices = one_cycle["signal_x"].values
+                            
+                            if len(cycle_indices) > 0:
+                                cycle_start = int(cycle_indices[0])
+                                cycle_end = int(cycle_indices[-1])
+                                # Find R-peak that falls within this cycle's time range
+                                r_peaks_in_cycle = filtered_r_peaks[
+                                    (filtered_r_peaks >= cycle_start) & (filtered_r_peaks <= cycle_end)
+                                ]
+                                if len(r_peaks_in_cycle) > 0:
+                                    # Use the first R-peak in the cycle
+                                    r_peak_location = r_peaks_in_cycle[0]
+                                    # Find its index in the original R-peak array
+                                    r_peak_idx_in_array = np.where(filtered_r_peaks == r_peak_location)[0]
+                                    if len(r_peak_idx_in_array) > 0 and r_peak_idx_in_array[0] < len(precomputed_peaks_by_rpeak):
+                                        precomputed_peaks[cycle_idx] = precomputed_peaks_by_rpeak[r_peak_idx_in_array[0]]
+            
             component_keys = ["P", "Q", "R", "S", "T"]
             peak_feature_keys = [
+                # Global indices (absolute sample indices)
                 "global_center_idx",
                 "global_le_idx",
                 "global_ri_idx",
 
+                # Time-domain locations (ms relative to cycle)
                 "center_ms",
                 "le_ms",
                 "ri_ms",
-                
+
+                # Local indices (within cycle / detrended segment)
                 "center_idx",
                 "le_idx",
                 "ri_idx",
-                
+
+                # Gaussian fit parameters (morphology)
                 "gauss_center",
                 "gauss_height",
-                
                 "gauss_stdev_samples",
                 "gauss_stdev_ms",
                 "gauss_fwhm_samples",
                 "gauss_fwhm_ms",
-                
+
+                # FWHM-based boundary indices (inner width around peak)
+                "fwhm_le_idx",
+                "fwhm_ri_idx",
+                "fwhm_le_ms",
+                "fwhm_ri_ms",
+                "fwhm_global_le_idx",
+                "fwhm_global_ri_idx",
+
+                # Amplitudes at key points
                 "center_voltage",
                 "le_voltage",
                 "ri_voltage",
-                
+
+                # Duration / symmetry / sharpness
                 "duration_ms",
                 "rise_ms",
                 "decay_ms",
-                
                 "rdsm",
                 "sharpness",
 
+                # Area under the wave
                 "voltage_integral_uv_ms",
             ]
             interval_keys = [
@@ -439,9 +520,6 @@ class PyHEARTS:
                 "R_minus_P_voltage_diff_signed",
                 "T_minus_R_voltage_diff_signed",
             ]
-
-            # Use the actual cycle labels from epochs_df (sorted for determinism)
-            cycles = np.sort(epochs_df["cycle"].unique())
             
             self.output_dict = self.initialize_output_dict(
                 cycle_inds=np.arange(len(cycles)),
@@ -454,7 +532,7 @@ class PyHEARTS:
             for cycle_idx, cycle_label in enumerate(cycles):
                 one_cycle = epochs_df.loc[epochs_df["cycle"] == cycle_label]
                 try:
-                    self.process_cycle_wrapper(one_cycle, cycle_idx)
+                    self.process_cycle_wrapper(one_cycle, cycle_idx, precomputed_peaks=precomputed_peaks)
                 except Exception as e:
                     logging.error(f"Error processing cycle {cycle_idx}: {e}")
                     continue
