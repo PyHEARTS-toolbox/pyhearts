@@ -179,5 +179,23 @@ verify_installation.py
 analyze_zero_t_peaks.py
 debug_t_peak_detection.py
 plot_problematic_subjects.py
+plot_sel104_peaks.py
 test_sel102_amplitude.py
+
+# Example/integration files (not part of the toolbox)
+pyhearts/processing/adaptive_threshold_integration_example.py
+
+# Analysis and documentation files (non-toolbox)
+ADAPTIVE_THRESHOLD_IMPLEMENTATION.md
+ECGPUWAVE_T_DETECTION_ANALYSIS.md
+T_PEAK_ANALYSIS_REPORT.md
+
+# Analysis output CSV files
+t_peak_analysis_results.csv
+*_analysis_results.csv
+
+# Specific plot images (already covered by *.png but being explicit)
+sel102_t_wave_analysis.png
+sel104_t_wave_analysis.png
+sel104_peaks_plot.png
 

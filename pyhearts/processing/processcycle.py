@@ -24,6 +24,11 @@ from .validation import (
 )
 from .waveletoffset import calc_wavelet_dynamic_offset
 from .snrgate import gate_by_local_mad
+from .adaptive_threshold import gate_by_adaptive_threshold_ecgpuwave_style
+from .ecgpuwave_t_detection import (
+    compute_filtered_derivative,
+    detect_t_wave_ecgpuwave_style,
+)
 
 
 def bandpass_filter_pwave(
@@ -455,19 +460,37 @@ def process_cycle(
                 print(f"[Cycle {cycle_idx}]: Adjusted S max index to within signal bounds: {s_end}")
 
         # --- Q Peak ---
-        q_center_idx, q_height, _ = find_peaks(
-            sig_detrended,
-            xs_rel_idxs,
-            q_start,
-            r_center_idx,
-            mode="min",
-            verbose=verbose,
-            label="Q",
-            cycle_idx=cycle_idx,
-        )
+        # Automatic detection: Skip Q/S detection if sampling rate < 300 Hz
+        # At lower sampling rates, Q and S peaks may not be reliably detectable
+        # due to insufficient temporal resolution
+        MIN_SAMPLING_RATE_FOR_QS = 300.0
+        
+        if sampling_rate < MIN_SAMPLING_RATE_FOR_QS:
+            if verbose:
+                print(f"[Cycle {cycle_idx}]: Skipping Q peak detection (sampling rate {sampling_rate:.1f} Hz < {MIN_SAMPLING_RATE_FOR_QS} Hz)")
+            q_center_idx, q_height = None, None
+        else:
+            # Ensure Q search is before R (fix temporal order violations)
+            if q_start is not None and r_center_idx is not None:
+                if q_start >= r_center_idx:
+                    # q_start is after R, which is invalid - search before R instead
+                    q_start = max(0, r_center_idx - int(round(0.1 * sampling_rate)))  # 100ms before R
+                    if verbose:
+                        print(f"[Cycle {cycle_idx}]: Adjusted q_start from invalid position to {q_start} (before R at {r_center_idx})")
+            
+            q_center_idx, q_height, _ = find_peaks(
+                sig_detrended,
+                xs_rel_idxs,
+                q_start,
+                r_center_idx,
+                mode="min",
+                verbose=verbose,
+                label="Q",
+                cycle_idx=cycle_idx,
+            )
 
-        if q_center_idx is None and verbose:
-            print(f"[Cycle {cycle_idx}]: Q peak rejected — not included in fit.")
+            if q_center_idx is None and verbose:
+                print(f"[Cycle {cycle_idx}]: Q peak rejected — not included in fit.")
 
         # --- P Peak ---
         # Check if precomputed peaks are available
@@ -738,7 +761,12 @@ def process_cycle(
 
      
         # --- S Peak ---
-        if r_center_idx is None or s_end is None or s_end <= r_center_idx:
+        # Automatic detection: Skip S detection if sampling rate < 300 Hz
+        if sampling_rate < MIN_SAMPLING_RATE_FOR_QS:
+            if verbose:
+                print(f"[Cycle {cycle_idx}]: Skipping S peak detection (sampling rate {sampling_rate:.1f} Hz < {MIN_SAMPLING_RATE_FOR_QS} Hz)")
+            s_center_idx, s_height = None, None
+        elif r_center_idx is None or s_end is None or s_end <= r_center_idx:
             if verbose:
                 print(f"[Cycle {cycle_idx}]: Cannot search for S peak — invalid R or S window.")
             s_center_idx, s_height = None, None
@@ -754,7 +782,7 @@ def process_cycle(
                 cycle_idx=cycle_idx,
             )
 
-        if s_center_idx is None and verbose:
+        if s_center_idx is None and verbose and sampling_rate >= MIN_SAMPLING_RATE_FOR_QS:
             print(f"[Cycle {cycle_idx}]: S peak rejected — not included in fit.")
 
         # # --- T Peak ---
@@ -767,8 +795,9 @@ def process_cycle(
             if t_annotation is not None:
                 # Use precomputed T-wave annotation
                 # Map from global signal indices to cycle-relative indices
-                cycle_start_global = int(one_cycle["signal_x"].iloc[0])
-                cycle_end_global = int(one_cycle["signal_x"].iloc[-1])
+                # Use "index" column for global indices, not "signal_x" (which is relative time)
+                cycle_start_global = int(one_cycle["index"].iloc[0]) if "index" in one_cycle.columns else int(one_cycle["signal_x"].iloc[0])
+                cycle_end_global = int(one_cycle["index"].iloc[-1]) if "index" in one_cycle.columns else int(one_cycle["signal_x"].iloc[-1])
                 cycle_length = len(one_cycle)
                 
                 # Check if peak is within cycle boundaries
@@ -798,7 +827,7 @@ def process_cycle(
             t_region_start = s_center_idx if s_center_idx is not None else r_center_idx
             if t_region_start is None or t_region_start >= len(sig_detrended) - 2:
                 if verbose:
-                    print(f"[Cycle {cycle_idx}]: Cannot search for T — missing S/R bounds.")
+                    print(f"[Cycle {cycle_idx}]: Cannot search for T — missing S/R bounds (t_region_start={t_region_start}, signal_len={len(sig_detrended)}).")
             else:
                 n = len(sig_detrended)
             
@@ -811,91 +840,64 @@ def process_cycle(
                 post_qrs_guard = max(0, min(post_qrs_guard, cap_samples))
                 
                 t_start_idx = min(max(int(t_region_start) + 1 + max(gap, post_qrs_guard), 0), n - 2)
-                t_end_idx   = max(
-                    t_start_idx + 2,
-                    n - int(round((cfg.detrend_window_ms / 2.0) * sampling_rate / 1000.0)),
+                
+                # Calculate T end more permissively - use most of the cycle, not just detrend window
+                # ECGPUWAVE searches up to ~400ms after R or until next R
+                max_t_window_ms = 400.0  # Maximum T wave search window
+                t_end_idx = min(
+                    n - 1,
+                    t_start_idx + int(round(max_t_window_ms * sampling_rate / 1000.0)),
                 )
+
+                if verbose:
+                    print(f"[Cycle {cycle_idx}]: T search window: start={t_start_idx}, end={t_end_idx}, size={t_end_idx - t_start_idx}, signal_len={n}")
 
                 if t_end_idx - t_start_idx < 3:
                     if verbose:
-                        print(f"[Cycle {cycle_idx}]: T window too small (start={t_start_idx}, end={t_end_idx}).")
+                        print(f"[Cycle {cycle_idx}]: T window too small (start={t_start_idx}, end={t_end_idx}, signal_len={n}).")
                 else:
-                    # Derivative-based T-wave detection: band-pass filter + derivative-based detection
-                    # Apply band-pass filter (5-15 Hz) for T-wave detection
-                    t_search_segment = sig_detrended[t_start_idx:t_end_idx]
-                    t_search_filtered = bandpass_filter_pwave(
-                        t_search_segment, sampling_rate, lowcut=5.0, highcut=15.0, order=4
+                    # ECGPUWAVE-style T-wave detection: filtered derivative + zero-crossing
+                    if verbose:
+                        print(f"[Cycle {cycle_idx}]: Using ECGPUWAVE-style T wave detection")
+                    
+                    # Compute filtered derivative (like ECGPUWAVE's dbuf)
+                    # Use the full detrended signal for better derivative computation
+                    derivative = compute_filtered_derivative(
+                        sig_detrended,
+                        sampling_rate,
+                        lowpass_cutoff=40.0,  # ECGPUWAVE uses 40 Hz low-pass
                     )
                     
-                    # Map back to full signal indices for detection
-                    sig_for_t_detection = sig_detrended.copy()
-                    sig_for_t_detection[t_start_idx:t_end_idx] = t_search_filtered
+                    # Detect T wave using ECGPUWAVE method
+                    # s_end_idx should be cycle-relative (not global)
+                    s_end_for_t = s_center_idx if s_center_idx is not None else None
                     
-                    # Use derivative-based detection for better accuracy
-                    # Try both positive and negative T-waves
-                    # Create xs array matching signal length for find_peaks
-                    xs_for_t_detection = np.arange(len(sig_for_t_detection))
-                    
-                    t_center_idx_pos, t_height_pos, _ = find_peaks(
-                        signal=sig_for_t_detection,
-                        xs=xs_for_t_detection,
-                        start_idx=t_start_idx,
-                        end_idx=t_end_idx,
-                        mode="max",  # Positive T-wave
-                        verbose=verbose,
-                        label="T",
-                        cycle_idx=cycle_idx,
-                        use_derivative=True,  # Use derivative-based detection
-                    )
-                    t_center_idx_neg, t_height_neg, _ = find_peaks(
-                        signal=sig_for_t_detection,
-                        xs=xs_for_t_detection,
-                        start_idx=t_start_idx,
-                        end_idx=t_end_idx,
-                        mode="min",  # Negative T-wave
-                        verbose=verbose,
-                        label="T",
-                        cycle_idx=cycle_idx,
-                        use_derivative=True,  # Use derivative-based detection
-                    )
-                    
-                    # Choose the one with larger absolute amplitude
-                    if t_center_idx_pos is not None and t_center_idx_neg is not None:
-                        if abs(t_height_pos) >= abs(t_height_neg):
-                            t_center_idx, t_height = t_center_idx_pos, t_height_pos
-                        else:
-                            t_center_idx, t_height = t_center_idx_neg, t_height_neg
-                    elif t_center_idx_pos is not None:
-                        t_center_idx, t_height = t_center_idx_pos, t_height_pos
-                    elif t_center_idx_neg is not None:
-                        t_center_idx, t_height = t_center_idx_neg, t_height_neg
-                    else:
-                        t_center_idx, t_height = None, None
-                    
-                    # Validate with SNR gate (if enabled)
-                    if t_center_idx is not None:
-                        # Store original detected position BEFORE SNR gate (for accurate timing)
-                        t_center_idx_detected = t_center_idx
-                        
-                        # Get signal value at detected position for polarity check
-                        seg = sig_detrended[t_start_idx:t_end_idx]
-                        t_detected_value = seg[t_center_idx - t_start_idx] if (t_center_idx - t_start_idx) < len(seg) else seg[0]
-                        expected_polarity = "positive" if t_detected_value >= 0 else "negative"
-                        
-                        # Apply SNR gate for validation
-                        keep, rel_idx, t_h = gate_by_local_mad(
-                            seg, sampling_rate,
-                            comp="T",
-                            expected_polarity=expected_polarity,  # Use detected polarity
-                            cfg=cfg,
-                            baseline_mode="median",
+                    t_peak_idx, t_start_boundary, t_end_boundary, t_peak_amplitude, morphology = (
+                        detect_t_wave_ecgpuwave_style(
+                            signal=sig_detrended,
+                            derivative=derivative,
+                            search_start=t_start_idx,
+                            search_end=t_end_idx,
+                            s_end_idx=s_end_for_t,
+                            sampling_rate=sampling_rate,
+                            verbose=verbose,
                         )
-                        if keep:
-                            # Use original detected position for timing (SNR gate only validates, doesn't refine position for T)
-                            t_center_idx = t_center_idx_detected
-                            t_height = t_h
-                        else:
-                            t_center_idx, t_height = None, None
+                    )
+                    
+                    if t_peak_idx is not None:
+                        # T wave detected successfully
+                        t_center_idx = t_peak_idx
+                        t_height = t_peak_amplitude
+                        
+                        if verbose:
+                            print(f"[Cycle {cycle_idx}]: T wave detected via ECGPUWAVE method: "
+                                  f"peak={t_center_idx}, amplitude={t_height:.4f}, "
+                                  f"morphology={morphology}")
+                    else:
+                        # No T wave detected
+                        t_center_idx, t_height = None, None
+                        if verbose:
+                            print(f"[Cycle {cycle_idx}]: No T wave detected via ECGPUWAVE method")
                         
         if t_center_idx is None and verbose:
             print(f"[Cycle {cycle_idx}]: T peak rejected — not included in fit.")
