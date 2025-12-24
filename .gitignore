@@ -133,9 +133,11 @@ IMPROVEMENTS_SUMMARY.md
 PHYSIOLOGICAL_VALIDATION.md
 POLARITY_AND_QUALITY_FIXES.md
 TWAVE_TUNING_COMPLETE.md
+T_PEAK_ANALYSIS_REPORT.md
 *_SUMMARY.md
 *_COMPLETE.md
 *_FIXES.md
+*_ANALYSIS_REPORT.md
 
 # Plot images (generated files)
 *.png
@@ -158,6 +160,8 @@ selected_leads.csv
 *_hrv_metrics.csv
 *_meta.json
 *_pyhearts.csv
+t_peak_analysis_results.csv
+*_t_wave_analysis.png
 
 # Build artifacts
 pyhearts.egg-info/
@@ -172,4 +176,8 @@ ecgpuwave-*/
 # Development/utility scripts (not part of the toolbox)
 process_qtdb_full.py
 verify_installation.py
+analyze_zero_t_peaks.py
+debug_t_peak_detection.py
+plot_problematic_subjects.py
+test_sel102_amplitude.py
 
