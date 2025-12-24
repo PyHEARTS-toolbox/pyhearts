@@ -252,6 +252,156 @@ def _adaptive_prominence_threshold(
     return base_multiplier * robust_std * factor
 
 
+def _training_phase_signal_noise_separation(
+    ecg: np.ndarray,
+    derivative: np.ndarray,
+    sampling_rate: float,
+    training_start_sec: float = 1.0,
+    training_end_sec: float = 3.0,
+) -> tuple[float, float]:
+    """
+    ECGPUWAVE-style training phase: separate signal peaks from noise peaks.
+    
+    Analyzes first 1-3 seconds to learn signal characteristics:
+    - Signal peak: highest peak in training window
+    - Noise peak: highest peak below 75% of signal peak
+    
+    Parameters
+    ----------
+    ecg : np.ndarray
+        ECG signal (possibly inverted).
+    derivative : np.ndarray
+        Derivative of ECG signal.
+    sampling_rate : float
+        Sampling rate in Hz.
+    training_start_sec : float
+        Start of training window in seconds.
+    training_end_sec : float
+        End of training window in seconds.
+    
+    Returns
+    -------
+    tuple[float, float]
+        (signal_peak, noise_peak) amplitudes.
+    """
+    training_start = int(training_start_sec * sampling_rate)
+    training_end = int(training_end_sec * sampling_rate)
+    training_end = min(training_end, len(ecg))
+    
+    if training_end <= training_start:
+        signal_peak = float(np.max(np.abs(ecg[:min(int(3.0 * sampling_rate), len(ecg))])))
+        noise_peak = signal_peak * 0.5
+        return signal_peak, noise_peak
+    
+    training_segment = ecg[training_start:training_end]
+    
+    if len(training_segment) < 10:
+        signal_peak = float(np.max(np.abs(training_segment))) if len(training_segment) > 0 else 1.0
+        noise_peak = signal_peak * 0.5
+        return signal_peak, noise_peak
+    
+    # Find peaks in training window
+    distance_lo = max(1, int(round(0.1 * sampling_rate)))  # 100ms minimum distance
+    peaks, _ = find_peaks(
+        training_segment,
+        distance=distance_lo,
+        prominence=np.std(training_segment) * 0.3
+    )
+    
+    if len(peaks) == 0:
+        signal_peak = float(np.max(np.abs(training_segment)))
+        noise_peak = signal_peak * 0.5
+        return signal_peak, noise_peak
+    
+    # Get peak amplitudes
+    peak_amplitudes = [training_segment[p] for p in peaks]
+    
+    # Signal peak: highest peak
+    signal_peak = float(np.max(peak_amplitudes))
+    
+    # Noise peak: highest peak below 75% of signal peak
+    qrs75 = 0.75 * signal_peak
+    noise_peaks = [amp for amp in peak_amplitudes if amp < qrs75]
+    noise_peak = float(np.max(noise_peaks)) if len(noise_peaks) > 0 else signal_peak * 0.5
+    
+    return signal_peak, noise_peak
+
+
+def _filter_rr_intervals(
+    rr_intervals: np.ndarray,
+    median_rr: float,
+    lower_frac: float = 0.92,
+    upper_frac: float = 1.16,
+) -> np.ndarray:
+    """
+    Filter RR intervals to remove outliers (ECGPUWAVE-style).
+    
+    Only keeps RR intervals within [lower_frac * median, upper_frac * median].
+    
+    Parameters
+    ----------
+    rr_intervals : np.ndarray
+        Array of RR intervals.
+    median_rr : float
+        Median RR interval for filtering.
+    lower_frac : float
+        Lower bound fraction (default: 0.92 = 92% of median).
+    upper_frac : float
+        Upper bound fraction (default: 1.16 = 116% of median).
+    
+    Returns
+    -------
+    np.ndarray
+        Filtered RR intervals.
+    """
+    if len(rr_intervals) == 0:
+        return rr_intervals
+    
+    lower_bound = lower_frac * median_rr
+    upper_bound = upper_frac * median_rr
+    
+    mask = (rr_intervals >= lower_bound) & (rr_intervals <= upper_bound)
+    return rr_intervals[mask]
+
+
+def _calculate_maximum_slope(
+    derivative: np.ndarray,
+    peak_idx: int,
+    sampling_rate: float,
+    window_ms: float = 80.0,
+) -> float:
+    """
+    Calculate maximum absolute derivative slope in window before peak.
+    
+    This is used for slope-based discrimination (ECGPUWAVE-style).
+    
+    Parameters
+    ----------
+    derivative : np.ndarray
+        Derivative of ECG signal.
+    peak_idx : int
+        Peak index.
+    sampling_rate : float
+        Sampling rate in Hz.
+    window_ms : float
+        Window size in ms before peak (default: 80ms).
+    
+    Returns
+    -------
+    float
+        Maximum absolute slope value.
+    """
+    window_samples = int(round(window_ms * sampling_rate / 1000.0))
+    start_idx = max(0, peak_idx - window_samples)
+    end_idx = min(len(derivative), peak_idx + 1)
+    
+    if end_idx <= start_idx:
+        return 0.0
+    
+    max_slope = float(np.max(np.abs(derivative[start_idx:end_idx])))
+    return max_slope
+
+
 def r_peak_detection(
     ecg: Union[np.ndarray, list[float]],
     sampling_rate: float,
@@ -265,12 +415,18 @@ def r_peak_detection(
     raw_ecg: Optional[np.ndarray] = None,  # Optional raw signal for polarity detection
 ) -> np.ndarray:
     """
-    Multi-pass, prominence-based R-peak detection driven by config.
+    Enhanced multi-pass R-peak detection with ECGPUWAVE-style improvements.
+    
+    Key improvements:
+    1. Explicit training phase (1-3s) to separate signal from noise
+    2. Filtered RR intervals (filter outliers: 92-116% of median) before calculating expected RR
+    3. Slope-based discrimination to reject T-waves (reject if slope < 75% of median QRS slope)
+    4. Aggressive gap-filling with progressive threshold reduction (backtracking)
     
     Optionally applies bandpass filtering (cfg.rpeak_preprocess) for noise robustness.
     First-pass uses a fixed refractory (cfg.rpeak_min_refrac_ms) to estimate RR.
-    Second-pass uses cfg.rpeak_rr_frac_second_pass * median(RR) as refractory.
-    Third-pass (gap-fill) searches for missed peaks in large RR gaps.
+    Second-pass uses cfg.rpeak_rr_frac_second_pass * filtered_median(RR) as refractory.
+    Third-pass (gap-fill) searches for missed peaks in large RR gaps with progressive threshold reduction.
     RR estimate is clamped using cfg.rpeak_bpm_bounds.
     
     Automatically detects inverted QRS complexes (where R-peaks are negative-going
@@ -342,34 +498,76 @@ def r_peak_detection(
     # This allows us to use the same peak-finding logic for both cases
     ecg_for_peak_detection = -ecg_filtered if is_inverted else ecg_filtered
 
-    # ----- Adaptive prominence threshold -----
-    # Use the original filtered signal for threshold calculation to maintain consistency
-    prominence_threshold = _adaptive_prominence_threshold(
+    # ----- Compute derivative for slope-based discrimination -----
+    derivative = np.gradient(ecg_for_peak_detection)
+
+    # ----- ECGPUWAVE-style training phase: signal/noise separation -----
+    signal_peak, noise_peak = _training_phase_signal_noise_separation(
+        ecg_for_peak_detection, derivative, sampling_rate
+    )
+    
+    # ECGPUWAVE threshold formula: noise + 0.25*(signal - noise)
+    ecgpuwave_threshold = noise_peak + 0.25 * (signal_peak - noise_peak)
+    
+    # Use ECGPUWAVE threshold if it's reasonable, otherwise fall back to adaptive
+    adaptive_threshold = _adaptive_prominence_threshold(
         ecg_filtered, cfg.rpeak_prominence_multiplier, sensitivity
     )
+    
+    # Use the more conservative of the two thresholds
+    prominence_threshold = max(ecgpuwave_threshold, adaptive_threshold * 0.5)
     
     # ----- First pass: conservative distance -----
     # Use the (possibly negated) signal for peak detection
     distance_lo = max(1, int(round(cfg.rpeak_min_refrac_ms * sampling_rate / 1000.0)))
     peaks_lo, _ = find_peaks(ecg_for_peak_detection, distance=distance_lo, prominence=prominence_threshold)
 
-    # ----- Second pass: RR-adaptive distance -----
+    # ----- Second pass: RR-adaptive distance with filtered RR intervals -----
     if peaks_lo.size < 3:
         initial_r_peaks = peaks_lo.astype(int)
         median_rr_samples = distance_lo  # fallback
     else:
-        rr_samp = np.median(np.diff(peaks_lo))
+        # Use filtered RR intervals (ECGPUWAVE-style)
+        rr_intervals = np.diff(peaks_lo)
+        filtered_rr_intervals = _filter_rr_intervals(
+            rr_intervals,
+            np.median(rr_intervals),
+            lower_frac=0.92,
+            upper_frac=1.16
+        )
+        
+        if len(filtered_rr_intervals) > 0:
+            median_rr_samples = float(np.median(filtered_rr_intervals))
+        else:
+            median_rr_samples = float(np.median(rr_intervals))
 
         min_bpm, max_bpm = cfg.rpeak_bpm_bounds
         rr_min = (60_000.0 / max_bpm) * sampling_rate / 1000.0
         rr_max = (60_000.0 / min_bpm) * sampling_rate / 1000.0
-        rr_samp = float(np.clip(rr_samp, rr_min, rr_max))
-        median_rr_samples = rr_samp
+        median_rr_samples = float(np.clip(median_rr_samples, rr_min, rr_max))
 
-        distance = max(1, int(round(cfg.rpeak_rr_frac_second_pass * rr_samp)))
+        distance = max(1, int(round(cfg.rpeak_rr_frac_second_pass * median_rr_samples)))
         initial_r_peaks, _ = find_peaks(
             ecg_for_peak_detection, distance=distance, prominence=prominence_threshold
         )
+    
+    # ----- Slope-based filtering: reject T-waves (ECGPUWAVE-style) -----
+    if initial_r_peaks.size > 0:
+        # Calculate slopes for all peaks
+        peak_slopes = []
+        for peak_idx in initial_r_peaks:
+            slope = _calculate_maximum_slope(derivative, peak_idx, sampling_rate)
+            peak_slopes.append(slope)
+        peak_slopes = np.array(peak_slopes)
+        
+        # Estimate QRS slope from median of top 50% peaks (likely QRS)
+        if len(peak_slopes) >= 2:
+            sorted_slopes = np.sort(peak_slopes)
+            median_qrs_slope = np.median(sorted_slopes[len(sorted_slopes)//2:])
+            
+            # Reject peaks with slope < 0.75 * median QRS slope (likely T-waves)
+            slope_mask = peak_slopes >= 0.75 * median_qrs_slope
+            initial_r_peaks = initial_r_peaks[slope_mask]
     
     # ----- Amplitude filtering: remove P/T waves detected as R-peaks -----
     # R-peaks should be the tallest peaks. Filter out peaks that are much
@@ -386,16 +584,27 @@ def r_peak_detection(
         amplitude_mask = peak_heights >= height_threshold
         initial_r_peaks = initial_r_peaks[amplitude_mask]
     
-    # ----- Third pass: gap-filling for missed beats -----
-    # Search for missed peaks in gaps > 1.8× median RR (likely missed beats)
-    # Only enabled for "maximum" sensitivity to avoid T-peak false positives
-    if initial_r_peaks.size >= 2 and sensitivity == "maximum":
-        gap_threshold = 1.8 * median_rr_samples  # More conservative: 1.8x instead of 1.5x
+    # ----- Third pass: aggressive gap-filling with backtracking (ECGPUWAVE-style) -----
+    if initial_r_peaks.size >= 2:
+        # Use filtered RR intervals for gap detection
         rr_intervals = np.diff(initial_r_peaks)
+        filtered_rr_intervals = _filter_rr_intervals(
+            rr_intervals,
+            np.median(rr_intervals),
+            lower_frac=0.92,
+            upper_frac=1.16
+        )
+        
+        if len(filtered_rr_intervals) > 0:
+            median_rr_samples = float(np.median(filtered_rr_intervals))
+        else:
+            median_rr_samples = float(np.median(rr_intervals))
+        
+        gap_threshold = 1.8 * median_rr_samples
         large_gaps = np.where(rr_intervals > gap_threshold)[0]
         
         additional_peaks = []
-        reduced_prominence = prominence_threshold * 0.85  # Less lenient: 0.85 instead of 0.8
+        umb2 = prominence_threshold / 2.0  # Secondary threshold for backtracking
         
         for gap_idx in large_gaps:
             start_idx = initial_r_peaks[gap_idx]
@@ -405,25 +614,49 @@ def r_peak_detection(
             if gap_segment.size < 10:
                 continue
             
-            # Find peaks in the gap with reduced prominence
-            gap_peaks, props = find_peaks(
-                gap_segment,
-                distance=max(1, int(0.5 * median_rr_samples)),  # Larger min distance
-                prominence=reduced_prominence,
-            )
-            
-            # Only keep peaks that are:
-            # 1. Reasonably positioned (not too close to edges)
-            # 2. Actually tall enough to be R-peaks (not T-peaks)
-            # Increased height threshold from 0.5 to 0.6 to reduce false positives
-            margin = int(0.25 * median_rr_samples)
-            r_peak_height_threshold = np.max(ecg_for_peak_detection[initial_r_peaks]) * 0.6
-            
-            for gp in gap_peaks:
-                global_idx = start_idx + gp
-                peak_height = gap_segment[gp]
-                if margin < gp < len(gap_segment) - margin and peak_height > r_peak_height_threshold:
-                    additional_peaks.append(global_idx)
+            # Progressive threshold reduction (ECGPUWAVE-style backtracking)
+            found_peak = False
+            for threshold_level in range(5):  # Max 5 levels
+                if threshold_level == 0:
+                    search_threshold = umb2
+                else:
+                    search_threshold = umb2 / (2.0 ** threshold_level)
+                
+                gap_peaks, _ = find_peaks(
+                    gap_segment,
+                    distance=max(1, int(0.5 * median_rr_samples)),
+                    prominence=search_threshold
+                )
+                gap_peaks = gap_peaks + start_idx
+                
+                # Check each gap peak with slope discrimination
+                for gp in gap_peaks:
+                    # Calculate slope
+                    peak_slope = _calculate_maximum_slope(derivative, gp, sampling_rate)
+                    
+                    # Slope check (if we have QRS slope estimate)
+                    if initial_r_peaks.size > 0:
+                        # Estimate QRS slope from existing peaks
+                        existing_slopes = []
+                        for ep in initial_r_peaks[:min(10, len(initial_r_peaks))]:
+                            existing_slopes.append(_calculate_maximum_slope(derivative, ep, sampling_rate))
+                        if len(existing_slopes) > 0:
+                            qrs_slope_estimate = np.median(existing_slopes)
+                            if peak_slope < 0.65 * qrs_slope_estimate:
+                                continue  # Likely T-wave
+                    
+                    # Height check
+                    peak_height = ecg_for_peak_detection[gp]
+                    if peak_height < signal_peak * 0.4:
+                        continue
+                    
+                    # Accept this peak
+                    additional_peaks.append(gp)
+                    found_peak = True
+                    break
+                
+                if found_peak:
+                    break
         
         if additional_peaks:
             initial_r_peaks = np.sort(np.concatenate([initial_r_peaks, additional_peaks]))

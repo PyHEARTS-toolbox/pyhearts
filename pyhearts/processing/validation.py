@@ -103,14 +103,22 @@ def log_peak_result(
         return None, None
 
     # Relative amplitude check against R
+    # For T waves, use more lenient threshold (ECGPUWAVE doesn't validate by signal amplitude)
+    # T waves can be smaller after detrending/filtering, so we use a lower threshold
     if r_height is not None and np.isfinite(r_height):
         r_abs = float(abs(r_height))
         ratios = (
             cfg.amp_min_ratio  # type: ignore[attr-defined]
             if (cfg is not None and hasattr(cfg, "amp_min_ratio"))
-            else {"P": 0.03, "T": 0.03, "Q": 0.005, "S": 0.005}
+            else {"P": 0.03, "T": 0.02, "Q": 0.005, "S": 0.005}  # T: 2% instead of 3%
         )
         min_ratio = ratios.get(comp)
+        
+        # For T waves, use even more lenient threshold (1.5% instead of 2%)
+        # ECGPUWAVE validates T waves using derivative amplitude, not signal amplitude
+        # So we should be more permissive for T waves detected via derivative method
+        if comp == "T":
+            min_ratio = min_ratio * 0.75  # Reduce threshold by 25% for T waves (1.5% of R)
 
         if min_ratio is not None and abs(float(height)) < min_ratio * r_abs:
             if verbose:
@@ -171,6 +179,9 @@ def validate_peak_temporal_order(
     # Check ordering: each peak should come before the next in expected order
     detected_components = [comp for comp in expected_order if comp in peak_indices]
     
+    # Track which components are problematic
+    problematic_components = set()
+    
     for i in range(len(detected_components) - 1):
         curr_comp = detected_components[i]
         next_comp = detected_components[i + 1]
@@ -183,11 +194,14 @@ def validate_peak_temporal_order(
                 f"comes after or at {next_comp} (idx={next_idx})"
             )
             errors.append(error_msg)
+            # Mark both components as problematic (one is too early, one is too late)
+            problematic_components.add(curr_comp)
+            problematic_components.add(next_comp)
             if verbose:
                 print(f"[Cycle {cycle_idx}]: {error_msg}")
     
     is_valid = len(errors) == 0
-    return is_valid, errors
+    return is_valid, errors, problematic_components
 
 
 def validate_intervals_physiological(
@@ -260,7 +274,7 @@ def validate_cycle_physiology(
     sampling_rate: float,
     verbose: bool = False,
     cycle_idx: Optional[int] = None,
-) -> Tuple[bool, Dict[str, List[str]]]:
+) -> Tuple[bool, Dict[str, Union[List[str], set]]]:
     """
     Comprehensive physiological validation for a single cycle.
     
@@ -283,21 +297,25 @@ def validate_cycle_physiology(
     
     Returns
     -------
-    Tuple[bool, Dict[str, List[str]]]
+    Tuple[bool, Dict[str, Union[List[str], set]]]
         - bool: True if cycle passes all validations, False otherwise.
-        - Dict[str, List[str]]: Dictionary with 'peak_ordering' and 'intervals' keys,
-          each containing a list of error messages (empty if valid).
+        - Dict with keys:
+          - 'peak_ordering': List of error messages
+          - 'intervals': List of error messages
+          - 'problematic_components': Set of component names with ordering issues
     """
     all_errors = {
         'peak_ordering': [],
         'intervals': [],
+        'problematic_components': set(),
     }
     
     # Validate peak temporal ordering
-    order_valid, order_errors = validate_peak_temporal_order(
+    order_valid, order_errors, problematic_components = validate_peak_temporal_order(
         peak_data, verbose=verbose, cycle_idx=cycle_idx
     )
     all_errors['peak_ordering'] = order_errors
+    all_errors['problematic_components'] = problematic_components
     
     # Validate intervals
     interval_valid, interval_errors = validate_intervals_physiological(

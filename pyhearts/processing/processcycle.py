@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Optional
 
 ##PyHEARTS IMPORTS
 import numpy as np
@@ -94,6 +95,7 @@ def process_cycle(
     verbose=False,
     cfg: ProcessCycleConfig | None = None,
     precomputed_peaks: dict | None = None,
+    next_r_global_center_idx: Optional[int] = None,
 ):
 
     cfg = cfg or ProcessCycleConfig()  # safe default
@@ -824,30 +826,50 @@ def process_cycle(
         
         # If precomputed peaks didn't provide a T-wave, use derivative-based detection
         if t_center_idx is None:
-            t_region_start = s_center_idx if s_center_idx is not None else r_center_idx
-            if t_region_start is None or t_region_start >= len(sig_detrended) - 2:
+            # ECGPUWAVE searches T waves starting from R peak, not S end
+            # Start search 100ms after R peak (ECGPUWAVE's bwind=100ms)
+            # This is more accurate than starting from S end
+            if r_center_idx is None:
                 if verbose:
-                    print(f"[Cycle {cycle_idx}]: Cannot search for T — missing S/R bounds (t_region_start={t_region_start}, signal_len={len(sig_detrended)}).")
+                    print(f"[Cycle {cycle_idx}]: Cannot search for T — missing R peak.")
             else:
                 n = len(sig_detrended)
             
-                # 1) Lightweight guards
-                gap = int(round(cfg.postQRS_refractory_window_ms * sampling_rate / 1000.0))
+                # ECGPUWAVE starts T search 100ms after R peak (bwind=100ms)
+                # This avoids detecting peaks in the ST segment or QRS tail
+                ecgpuwave_t_start_offset_ms = 100.0  # ECGPUWAVE's bwind parameter
+                t_start_idx = r_center_idx + int(round(ecgpuwave_t_start_offset_ms * sampling_rate / 1000.0))
+                t_start_idx = max(0, min(t_start_idx, n - 2))
                 
-                # wavelet-derived guard (from calc_wavelet_dynamic_offset), then cap via config
-                post_qrs_guard = int(offset_samples) if "offset_samples" in locals() else 0
-                cap_samples    = int(round(cfg.wavelet_guard_cap_ms * sampling_rate / 1000.0))
-                post_qrs_guard = max(0, min(post_qrs_guard, cap_samples))
+                # ECGPUWAVE end window (ewind) depends on RR interval:
+                # - If RR > 900ms: ewind=800ms
+                # - If RR > 800ms: ewind=600ms  
+                # - If RR > 600ms: ewind=450ms
+                # - Otherwise: ewind=450ms
+                # For simplicity, use 450ms as default (covers most cases)
+                # But also check if next R is available to limit the window
+                ecgpuwave_t_end_offset_ms = 450.0  # ECGPUWAVE's default ewind
+                t_end_from_r = r_center_idx + int(round(ecgpuwave_t_end_offset_ms * sampling_rate / 1000.0))
                 
-                t_start_idx = min(max(int(t_region_start) + 1 + max(gap, post_qrs_guard), 0), n - 2)
+                # If we have next R peak info, limit window to 210ms before next R (ECGPUWAVE's limit)
+                # Otherwise use the fixed window
+                # NOTE: Temporarily disabled next R limiting to debug - it may be causing issues
+                # if next_r_global_center_idx is not None:
+                #     # Convert next R to cycle-relative if needed
+                #     cycle_start_global = int(one_cycle["index"].iloc[0]) if not one_cycle.empty else 0
+                #     next_r_cycle_rel = next_r_global_center_idx - cycle_start_global
+                #     if next_r_cycle_rel > t_start_idx:  # Only limit if next R is after search start
+                #         t_end_idx = min(n - 1, next_r_cycle_rel - int(round(210.0 * sampling_rate / 1000.0)))
+                #     else:
+                #         t_end_idx = min(n - 1, t_end_from_r)
+                # else:
+                t_end_idx = min(n - 1, t_end_from_r)
                 
-                # Calculate T end more permissively - use most of the cycle, not just detrend window
-                # ECGPUWAVE searches up to ~400ms after R or until next R
-                max_t_window_ms = 400.0  # Maximum T wave search window
-                t_end_idx = min(
-                    n - 1,
-                    t_start_idx + int(round(max_t_window_ms * sampling_rate / 1000.0)),
-                )
+                # Ensure minimum window size
+                min_t_window_ms = 100.0
+                min_t_window_samples = int(round(min_t_window_ms * sampling_rate / 1000.0))
+                if t_end_idx - t_start_idx < min_t_window_samples:
+                    t_end_idx = min(n - 1, t_start_idx + min_t_window_samples)
 
                 if verbose:
                     print(f"[Cycle {cycle_idx}]: T search window: start={t_start_idx}, end={t_end_idx}, size={t_end_idx - t_start_idx}, signal_len={n}")
@@ -1607,23 +1629,25 @@ def process_cycle(
         if verbose:
             print(f"[Cycle {cycle_idx}]: ⚠️  Physiological validation FAILED - invalidating problematic values")
         
-        # If peak ordering is violated, invalidate the problematic peaks
+        # If peak ordering is violated, invalidate only the problematic peaks
         if validation_errors.get('peak_ordering'):
-            if verbose:
-                print(f"[Cycle {cycle_idx}]: Invalidating peaks due to ordering violations")
-            # Invalidate all peaks except R (R is critical and should be preserved if detected)
-            # This is a conservative approach - if ordering is wrong, we can't trust the other peaks
-            problematic_components = ["P", "Q", "S", "T"]
-            for comp in problematic_components:
-                if comp in peak_data:
-                    # Set center indices and related values to NaN in output_dict
-                    for key_suffix in ["_global_center_idx", "_global_le_idx", "_global_ri_idx", 
-                                       "_center_voltage", "_le_voltage", "_ri_voltage"]:
-                        key = f"{comp}{key_suffix}"
-                        if key in output_dict:
-                            if verbose:
-                                print(f"[Cycle {cycle_idx}]: Setting {key} to NaN due to ordering violation")
-                            output_dict[key][cycle_idx] = np.nan
+            problematic_components = validation_errors.get('problematic_components', set())
+            if problematic_components:
+                if verbose:
+                    print(f"[Cycle {cycle_idx}]: Invalidating problematic peaks due to ordering violations: {problematic_components}")
+                # Only invalidate the specific peaks that have ordering issues
+                # Don't invalidate R (R is critical and should be preserved if detected)
+                # Don't invalidate peaks that are correctly ordered (e.g., T if only P has issues)
+                for comp in problematic_components:
+                    if comp != "R" and comp in peak_data:  # Never invalidate R
+                        # Set center indices and related values to NaN in output_dict
+                        for key_suffix in ["_global_center_idx", "_global_le_idx", "_global_ri_idx", 
+                                           "_center_voltage", "_le_voltage", "_ri_voltage"]:
+                            key = f"{comp}{key_suffix}"
+                            if key in output_dict:
+                                if verbose:
+                                    print(f"[Cycle {cycle_idx}]: Setting {key} to NaN due to ordering violation")
+                                output_dict[key][cycle_idx] = np.nan
         
         # If intervals are out of physiological range, set them to NaN
         if validation_errors.get('intervals'):

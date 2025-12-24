@@ -201,8 +201,8 @@ class ProcessCycleConfig:
             raise ValueError("sharp_amp_norm ∈ {'p2p','rms','mad'}")
         
         # r-peak
-        if self.rpeak_method not in {"prominence", "pan_tompkins", "bandpass_energy"}:
-            raise ValueError("rpeak_method must be 'prominence', 'pan_tompkins', or 'bandpass_energy'")
+        if self.rpeak_method not in {"prominence", "pan_tompkins", "bandpass_energy", "ecgpuwave_style"}:
+            raise ValueError("rpeak_method must be 'prominence', 'pan_tompkins', 'bandpass_energy', or 'ecgpuwave_style'")
         lo_bpm, hi_bpm = self.rpeak_bpm_bounds
         if not (0 < lo_bpm < hi_bpm):
             raise ValueError("rpeak_bpm_bounds require 0 < low < high")

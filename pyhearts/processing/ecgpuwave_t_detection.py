@@ -63,11 +63,13 @@ def detect_zero_crossing(
     signal: np.ndarray,
     start_idx: int,
     direction: str = "left",
+    max_search: Optional[int] = None,
 ) -> Optional[int]:
     """
     Detect zero-crossing in signal (ECGPUWAVE's detectar_cero).
     
     Finds the first zero-crossing from start_idx in the specified direction.
+    More robust than simple sign change - uses interpolation for sub-sample accuracy.
     
     Parameters
     ----------
@@ -77,6 +79,8 @@ def detect_zero_crossing(
         Starting index for search.
     direction : {"left", "right"}, default "left"
         Direction to search ("left" = decreasing index, "right" = increasing).
+    max_search : int, optional
+        Maximum number of samples to search (None = search until boundary).
     
     Returns
     -------
@@ -88,26 +92,52 @@ def detect_zero_crossing(
     
     if direction == "left":
         # Search left (decreasing index)
-        i = start_idx - 1
+        i = start_idx
+        search_count = 0
         while i > 0:
-            if signal[i] * signal[i - 1] <= 0:  # Sign change or zero
-                # Return the index closer to zero
-                if abs(signal[i]) < abs(signal[i - 1]):
+            if max_search is not None and search_count >= max_search:
+                break
+            if i > 0 and signal[i] * signal[i - 1] <= 0:  # Sign change or zero
+                # Use linear interpolation for sub-sample accuracy
+                if abs(signal[i]) < 1e-10:  # Already at zero
                     return i
-                else:
+                elif abs(signal[i - 1]) < 1e-10:  # Previous sample at zero
                     return i - 1
+                else:
+                    # Linear interpolation to find exact zero-crossing
+                    # y = y0 + (y1 - y0) * t, solve for t where y = 0
+                    # t = -y0 / (y1 - y0)
+                    t = -signal[i - 1] / (signal[i] - signal[i - 1])
+                    # Return the closer integer index
+                    if t < 0.5:
+                        return i - 1
+                    else:
+                        return i
             i -= 1
+            search_count += 1
     else:  # direction == "right"
         # Search right (increasing index)
-        i = start_idx + 1
+        i = start_idx
+        search_count = 0
         while i < len(signal) - 1:
-            if signal[i] * signal[i + 1] <= 0:  # Sign change or zero
-                # Return the index closer to zero
-                if abs(signal[i]) < abs(signal[i + 1]):
+            if max_search is not None and search_count >= max_search:
+                break
+            if i < len(signal) - 1 and signal[i] * signal[i + 1] <= 0:  # Sign change or zero
+                # Use linear interpolation for sub-sample accuracy
+                if abs(signal[i]) < 1e-10:  # Already at zero
                     return i
-                else:
+                elif abs(signal[i + 1]) < 1e-10:  # Next sample at zero
                     return i + 1
+                else:
+                    # Linear interpolation to find exact zero-crossing
+                    t = -signal[i] / (signal[i + 1] - signal[i])
+                    # Return the closer integer index
+                    if t < 0.5:
+                        return i
+                    else:
+                        return i + 1
             i += 1
+            search_count += 1
     
     return None
 
@@ -288,19 +318,17 @@ def detect_t_wave_ecgpuwave_style(
     if verbose:
         print(f"  Derivative min: {ymin:.4f} at {imin}, max: {ymax:.4f} at {imax}")
     
-    # Check if we have valid T wave (must have both positive and negative)
-    # Relaxed: allow T waves even if derivative is mostly one-sided (ECGPUWAVE handles this)
-    # Only reject if derivative is completely monotonic in one direction
-    if ymin > 0 and ymax > 0:
-        # All positive - no T wave
+    # Check if we have valid T wave
+    # ECGPUWAVE is very permissive - it will detect T waves even with small derivative variations
+    # Only reject if derivative is completely flat (no variation)
+    deriv_range = ymax - ymin
+    if deriv_range < 0.01:  # Very small variation - likely noise or flat signal
         if verbose:
-            print(f"  No valid T wave - all positive derivative (ymin={ymin:.4f}, ymax={ymax:.4f})")
+            print(f"  No valid T wave - derivative too flat (ymin={ymin:.4f}, ymax={ymax:.4f}, range={deriv_range:.4f})")
         return None, None, None, None, 6
-    if ymin < 0 and ymax < 0:
-        # All negative - no T wave
-        if verbose:
-            print(f"  No valid T wave - all negative derivative (ymin={ymin:.4f}, ymax={ymax:.4f})")
-        return None, None, None, None, 6
+    
+    # Allow T waves even if derivative is mostly one-sided (ECGPUWAVE handles monophasic T waves)
+    # ECGPUWAVE detects T waves with morphology types 2 (only up) and 3 (only down)
     
     # Determine morphology and find T peak
     # For simplicity, we'll handle normal and inverted T waves
@@ -330,49 +358,114 @@ def detect_t_wave_ecgpuwave_style(
         peak_ref_idx = imin
         peak_ref_amp = ymin
     
-    # Find zero-crossing for T peak
-    # Try to find zero-crossings around the peak reference
+    # Find T peak using ECGPUWAVE's method
+    # ECGPUWAVE uses zero-crossings in the derivative, but the key is finding
+    # the correct zero-crossing that corresponds to the T wave peak, not an
+    # early ST segment feature. We do this by:
+    # 1. Identifying the T wave region using derivative min/max
+    # 2. Finding signal maximum/minimum in that region (most reliable)
+    # 3. Using zero-crossings as refinement, but only if they're in the T wave region
+    
+    # Define T wave region: between derivative min and max
+    # This identifies where the T wave actually is
+    t_region_start = min(imin, imax)
+    t_region_end = max(imin, imax)
+    
+    # Expand region to capture full T wave (ECGPUWAVE uses wider search)
+    # Add ~30ms on each side to ensure we capture the peak
+    expansion_samples = int(round(30.0 * sampling_rate / 1000.0))
+    t_region_start = max(search_start, t_region_start - expansion_samples)
+    t_region_end = min(search_end - 1, t_region_end + expansion_samples)
+    
+    if t_region_end <= t_region_start:
+        t_region_start = search_start
+        t_region_end = search_end - 1
+    
+    # Primary method: Find signal maximum/minimum in T wave region
+    # This is the most reliable indicator of the true T peak
+    t_region_signal = signal[t_region_start:t_region_end + 1]
+    
+    if len(t_region_signal) == 0:
+        signal_peak_idx = None
+    elif morphology == 0:
+        # Normal T: find maximum in signal
+        t_peak_rel = int(np.argmax(t_region_signal))
+        signal_peak_idx = t_region_start + t_peak_rel
+    else:
+        # Inverted T: find minimum in signal
+        t_peak_rel = int(np.argmin(t_region_signal))
+        signal_peak_idx = t_region_start + t_peak_rel
+    
+    # Secondary method: Find zero-crossings in derivative (ECGPUWAVE's approach)
+    # But constrain search to avoid early ST segment detections
+    # Limit search distance to ~50ms from min/max positions
+    max_search_distance = int(round(50.0 * sampling_rate / 1000.0))
+    
     if morphology == 0:
-        # Normal T: find zero-crossing between min and max
-        icero1 = detect_zero_crossing(derivative, imin, direction="right") if imin < imax else None
-        icero2 = detect_zero_crossing(derivative, imax, direction="left") if imax > imin else None
+        # Normal T: icero1 from imin going left, icero2 from imax going right
+        # For normal T: imax is before peak (rising), imin is after peak (falling)
+        # Zero-crossing should be between imax and imin
+        icero1 = detect_zero_crossing(derivative, imin, direction="left", max_search=max_search_distance)
+        icero2 = detect_zero_crossing(derivative, imax, direction="right", max_search=max_search_distance)
+        
+        # Critical: Only use zero-crossings that are BETWEEN imax and imin
+        # This ensures we find the T peak zero-crossing, not an early ST segment feature
+        # For normal T: imax (before peak) < zero-crossing < imin (after peak)
+        if icero1 is not None:
+            # icero1 should be between imax and imin (searching left from imin)
+            if icero1 < imax or icero1 > imin or icero1 < t_region_start or icero1 > t_region_end:
+                icero1 = None  # Reject if outside valid T wave region
+        if icero2 is not None:
+            # icero2 should be between imax and imin (searching right from imax)
+            if icero2 < imax or icero2 > imin or icero2 < t_region_start or icero2 > t_region_end:
+                icero2 = None  # Reject if outside valid T wave region
     else:
-        # Inverted T: find zero-crossing between max and min
-        icero1 = detect_zero_crossing(derivative, imax, direction="right") if imax < imin else None
-        icero2 = detect_zero_crossing(derivative, imin, direction="left") if imin > imax else None
+        # Inverted T: icero1 from imax going left, icero2 from imin going right
+        # For inverted T: imin is before peak (falling), imax is after peak (rising)
+        # Zero-crossing should be between imin and imax
+        icero1 = detect_zero_crossing(derivative, imax, direction="left", max_search=max_search_distance)
+        icero2 = detect_zero_crossing(derivative, imin, direction="right", max_search=max_search_distance)
+        
+        # Critical: Only use zero-crossings that are BETWEEN imin and imax
+        # For inverted T: imin (before peak) < zero-crossing < imax (after peak)
+        if icero1 is not None:
+            # icero1 should be between imin and imax (searching left from imax)
+            if icero1 < imin or icero1 > imax or icero1 < t_region_start or icero1 > t_region_end:
+                icero1 = None
+        if icero2 is not None:
+            # icero2 should be between imin and imax (searching right from imin)
+            if icero2 < imin or icero2 > imax or icero2 < t_region_start or icero2 > t_region_end:
+                icero2 = None
     
-    if icero1 is not None and icero2 is not None:
-        t_peak_deriv_idx = (icero1 + icero2) // 2
-    elif icero1 is not None:
-        t_peak_deriv_idx = icero1
-    elif icero2 is not None:
-        t_peak_deriv_idx = icero2
+    # Choose best T peak: prefer signal max/min, but use zero-crossing average if available and close
+    if signal_peak_idx is not None:
+        # Use signal peak as primary
+        t_peak_deriv_idx = signal_peak_idx
+        
+        # Refine using zero-crossings if they're close to signal peak (within ~40ms)
+        refine_window = int(round(40.0 * sampling_rate / 1000.0))
+        if icero1 is not None and icero2 is not None:
+            zero_crossing_avg = (icero1 + icero2) // 2
+            # If zero-crossing average is close to signal peak, use it (more precise)
+            if abs(zero_crossing_avg - signal_peak_idx) <= refine_window:
+                t_peak_deriv_idx = zero_crossing_avg
+        elif icero2 is not None:
+            # Use single zero-crossing if close to signal peak
+            if abs(icero2 - signal_peak_idx) <= refine_window:
+                t_peak_deriv_idx = icero2
     else:
-        # Fallback: use the peak reference index (where derivative is max/min)
-        # Then find actual signal peak near that location
-        t_peak_deriv_idx = peak_ref_idx
-        # Find actual signal peak in a small window around derivative peak
-        search_win = min(10, (search_end - search_start) // 4)
-        peak_search_start = max(search_start, t_peak_deriv_idx - search_win)
-        peak_search_end = min(search_end, t_peak_deriv_idx + search_win)
-        if morphology == 0:
-            # Normal T: find max in signal
-            peak_seg = signal[peak_search_start:peak_search_end]
-            if len(peak_seg) > 0:
-                t_peak_deriv_idx = peak_search_start + int(np.argmax(peak_seg))
+        # Fallback: use zero-crossing average if available
+        if icero1 is not None and icero2 is not None:
+            t_peak_deriv_idx = (icero1 + icero2) // 2
+        elif icero1 is not None:
+            t_peak_deriv_idx = icero1
+        elif icero2 is not None:
+            t_peak_deriv_idx = icero2
         else:
-            # Inverted T: find min in signal
-            peak_seg = signal[peak_search_start:peak_search_end]
-            if len(peak_seg) > 0:
-                t_peak_deriv_idx = peak_search_start + int(np.argmin(peak_seg))
+            # Last resort: use peak reference
+            t_peak_deriv_idx = peak_ref_idx
     
-    # Get signal amplitude at peak
-    if 0 <= t_peak_deriv_idx < len(signal):
-        t_peak_amplitude = signal[t_peak_deriv_idx]
-    else:
-        t_peak_amplitude = signal[peak_ref_idx] if 0 <= peak_ref_idx < len(signal) else 0.0
-    
-    # Find boundaries using adaptive threshold
+    # Find boundaries using adaptive threshold (needed for fallback)
     if morphology == 0:
         t_start = find_t_wave_boundary(derivative, imax, ymax, direction="left", back_factor=1.0)
         t_end = find_t_wave_boundary(derivative, imin, ymin, direction="right", back_factor=1.0) if ymin < 0 else None
@@ -390,11 +483,37 @@ def detect_t_wave_ecgpuwave_style(
     if t_end is not None and t_end > search_end:
         t_end = search_end
     
-    # Validate T peak position
+    # If zero-crossings weren't found, use midpoint of boundaries (ECGPUWAVE's fallback)
+    if t_peak_deriv_idx is None:
+        if t_start is not None and t_end is not None:
+            t_peak_deriv_idx = (t_start + t_end) // 2
+        elif t_start is not None:
+            t_peak_deriv_idx = t_start + 10  # Small offset from start
+        elif t_end is not None:
+            t_peak_deriv_idx = t_end - 10  # Small offset from end
+        else:
+            # Last resort: use peak reference
+            t_peak_deriv_idx = peak_ref_idx
+    
+    # Validate T peak position (ECGPUWAVE checks if peak is outside boundaries)
+    if t_start is not None and t_end is not None:
+        if t_peak_deriv_idx >= t_end or t_peak_deriv_idx <= t_start:
+            # Use midpoint (ECGPUWAVE's fallback: icero=itbeg(n)+(itend(n)-itbeg(n))/2)
+            t_peak_deriv_idx = (t_start + t_end) // 2
+            if verbose:
+                print(f"  T peak outside boundaries, using midpoint: {t_peak_deriv_idx}")
+    
+    # Final bounds check
     if t_peak_deriv_idx < search_start or t_peak_deriv_idx >= search_end:
         if verbose:
-            print(f"  T peak out of bounds: {t_peak_deriv_idx} not in [{search_start}, {search_end})")
+            print(f"  T peak out of search window: {t_peak_deriv_idx} not in [{search_start}, {search_end})")
         return None, None, None, None, 6
+    
+    # Get signal amplitude at peak
+    if 0 <= t_peak_deriv_idx < len(signal):
+        t_peak_amplitude = signal[t_peak_deriv_idx]
+    else:
+        t_peak_amplitude = signal[peak_ref_idx] if 0 <= peak_ref_idx < len(signal) else 0.0
     
     if verbose:
         print(f"  T wave detected: peak={t_peak_deriv_idx}, start={t_start}, end={t_end}, "
