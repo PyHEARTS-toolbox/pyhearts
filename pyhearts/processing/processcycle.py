@@ -1640,13 +1640,37 @@ def process_cycle(
         if verbose:
             print(f"[Cycle {cycle_idx}]: ⚠️  Physiological validation FAILED - invalidating problematic values")
         
-        # If peak ordering is violated, invalidate the problematic peaks
+        # If peak ordering is violated, invalidate only the problematic peaks
         if validation_errors.get('peak_ordering'):
             if verbose:
                 print(f"[Cycle {cycle_idx}]: Invalidating peaks due to ordering violations")
-            # Invalidate all peaks except R (R is critical and should be preserved if detected)
-            # This is a conservative approach - if ordering is wrong, we can't trust the other peaks
-            problematic_components = ["P", "Q", "S", "T"]
+            
+            # Parse error messages to identify which specific components are problematic
+            # Error format: "Temporal order violation: P (idx=147) comes after or at R (idx=147)"
+            problematic_components = set()
+            for error_msg in validation_errors['peak_ordering']:
+                # Extract the component name from error message
+                # Format: "Temporal order violation: COMPONENT (idx=...) comes after or at ..."
+                if "Temporal order violation:" in error_msg:
+                    parts = error_msg.split("Temporal order violation:")[1].strip()
+                    # Get the first component mentioned (the one that's out of order)
+                    comp_name = parts.split(" (idx=")[0].strip()
+                    if comp_name in ["P", "Q", "R", "S", "T"]:
+                        problematic_components.add(comp_name)
+            
+            # Also check if the NEXT component in the violation should be invalidated
+            # For example, if P comes after R, we might want to invalidate P but not R or T
+            # Only invalidate the component that's actually out of order
+            # Never invalidate R (it's critical)
+            problematic_components.discard("R")
+            
+            if len(problematic_components) == 0:
+                # If we couldn't parse, fall back to invalidating all except R (conservative)
+                problematic_components = {"P", "Q", "S", "T"}
+                if verbose:
+                    print(f"[Cycle {cycle_idx}]: Could not parse problematic components, invalidating all except R")
+            
+            # Only invalidate the specific problematic components
             for comp in problematic_components:
                 if comp in peak_data:
                     # Set center indices and related values to NaN in output_dict

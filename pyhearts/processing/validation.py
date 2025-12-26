@@ -91,20 +91,28 @@ def log_peak_result(
 
     # Polarity checks
     # Step 5: Allow negative P-waves and T-waves for inverted leads or detrended signals
+    # For T-waves: Accept both positive and negative (detrending can change apparent polarity)
+    # The morphology detection in detect_t_wave_ecgpuwave_style handles true morphology
     if expected_polarity == "peak" and height < 0 and comp in ("P", "T"):
         # For P-waves, allow negative if it's the only detection (inverted leads)
-        # For T-waves, also allow negative - detrended signals can make positive T waves appear negative
-        # The morphology detection algorithm handles this, so we should accept what it detects
+        # For T-waves, always accept negative - detrended signals can make positive T waves appear negative,
+        # and truly inverted T waves should also be accepted
         if comp == "P":
             if verbose:
                 print(f"[Cycle {cycle_idx}]: P-wave is negative (inverted lead), accepting anyway.")
             # Accept negative P-wave (inverted lead)
         else:
-            # T-waves: accept negative (can be due to detrending or truly inverted)
+            # T-waves: Always accept negative (can be due to detrending or truly inverted)
             # The morphology detection algorithm determines this, so trust its judgment
             if verbose:
                 print(f"[Cycle {cycle_idx}]: T-wave is negative (inverted or detrended signal), accepting anyway.")
             # Accept negative T-wave
+    # Also allow positive T-waves even if they might be inverted in raw signal
+    # (detrending can make inverted T waves appear positive)
+    if expected_polarity == "peak" and height >= 0 and comp == "T":
+        # Accept positive T-waves - they may be inverted in raw signal but appear positive after detrending
+        # The morphology detection algorithm handles this
+        pass  # Accept by default
     if expected_polarity == "trough" and height >= 0 and comp in ("Q", "S"):
         if verbose:
             print(f"[Cycle {cycle_idx}]: {comp} polarity invalid (expected negative).")

@@ -293,19 +293,25 @@ def detect_t_wave_ecgpuwave_style(
     if verbose:
         print(f"  Derivative min: {ymin:.4f} at {imin}, max: {ymax:.4f} at {imax}")
     
-    # Check if we have valid T wave (must have both positive and negative)
-    # Relaxed: allow T waves even if derivative is mostly one-sided (ECGPUWAVE handles this)
-    # Only reject if derivative is completely monotonic in one direction
-    if ymin > 0 and ymax > 0:
-        # All positive - no T wave
+    # Check if we have valid T wave
+    # ECGPUWAVE allows T waves even if derivative is mostly one-sided
+    # Only reject if derivative is completely monotonic (no variation)
+    # For inverted T waves, we may have mostly negative derivative with small positive
+    # For normal T waves, we may have mostly positive derivative with small negative
+    # So we need to be lenient - only reject if there's truly no T wave structure
+    
+    # Check if there's any meaningful variation in the derivative
+    deriv_variation = ymax - ymin
+    min_variation_threshold = 0.01  # Minimum variation to consider it a T wave
+    
+    if deriv_variation < min_variation_threshold:
+        # No meaningful variation - likely no T wave
         if verbose:
-            print(f"  No valid T wave - all positive derivative (ymin={ymin:.4f}, ymax={ymax:.4f})")
+            print(f"  No valid T wave - insufficient derivative variation ({deriv_variation:.4f})")
         return None, None, None, None, 6
-    if ymin < 0 and ymax < 0:
-        # All negative - no T wave
-        if verbose:
-            print(f"  No valid T wave - all negative derivative (ymin={ymin:.4f}, ymax={ymax:.4f})")
-        return None, None, None, None, 6
+    
+    # Allow T waves even if derivative is mostly one-sided (ECGPUWAVE handles this)
+    # The morphology detection will determine if it's normal or inverted
     
     # Determine morphology based on SIGNAL values relative to baseline/R peak
     # For detrended signals, we need to be careful - detrending can shift baseline
@@ -342,40 +348,67 @@ def detect_t_wave_ecgpuwave_style(
         max_above_search_median = signal_max_in_region > search_window_median
         min_below_search_median = signal_min_in_region < search_window_median
         
-        # Determine morphology: prefer positive (normal) unless negative is clearly dominant
-        # Use multiple criteria to be more robust
-        positive_score = 0
-        negative_score = 0
+        # Determine morphology: Check which peak is more prominent
+        # For inverted T waves (like sel117), the negative peak should be clearly dominant
+        # For normal T waves, the positive peak should be dominant
+        # Use absolute prominence to determine morphology (ECGPUWAVE approach)
+        # IMPORTANT: For detrended signals, the baseline may be shifted, so we need to be careful
         
-        # Criterion 1: Prominence relative to T region median
-        if max_prominence > 0:
-            positive_score += 1
-        if min_prominence > 0:
-            negative_score += 1
+        # Calculate absolute prominence (distance from median)
+        abs_max_prominence = abs(max_prominence)
+        abs_min_prominence = abs(min_prominence)
         
-        # Criterion 2: Above/below search window median
-        if max_above_search_median:
-            positive_score += 1
-        if min_below_search_median:
-            negative_score += 1
+        # Also check the actual signal values relative to each other
+        # For inverted T waves, the negative peak should be larger in absolute value
+        abs_max_val = abs(signal_max_in_region)
+        abs_min_val = abs(signal_min_in_region)
         
-        # Criterion 3: Absolute prominence (but be lenient - prefer positive)
-        if abs(max_prominence) > abs(min_prominence) * 0.7:  # Prefer positive unless negative is 30%+ larger
-            positive_score += 1
-        elif abs(min_prominence) > abs(max_prominence) * 1.3:  # Only prefer negative if it's 30%+ larger
-            negative_score += 1
+        # Check if we have access to R peak value for better morphology determination
+        # If R peak is available, compare T wave polarity relative to R peak
+        # This is more reliable for detrended signals
+        if r_peak_value is not None and r_peak_idx is not None:
+            # Check signal value at R peak location
+            if 0 <= r_peak_idx < len(signal):
+                r_val = signal[r_peak_idx]
+                # For inverted T waves, T should be on opposite side of baseline from R
+                # If R is positive and T is negative (or vice versa), it might be inverted
+                # But for detrended signals, this is less reliable
+                # Use the prominence-based approach instead
+                pass
         
-        # Determine morphology based on scores
-        if positive_score >= negative_score:
-            # Normal T wave (positive peak is preferred)
-            morphology = 0
-            peak_ref_idx = signal_max_idx_in_region
-            peak_ref_amp = signal_max_in_region
-        else:
-            # Inverted T wave (negative peak is clearly dominant)
+        # Determine morphology based on which peak is more prominent
+        # Use a threshold to avoid false positives for small variations
+        # For inverted T waves: negative peak should be at least 15% larger
+        # For normal T waves: positive peak should be dominant or comparable
+        if abs_min_prominence > abs_max_prominence * 1.15 and abs_min_val > abs_max_val * 1.15:
+            # Inverted T wave: negative peak is clearly dominant
             morphology = 1
             peak_ref_idx = signal_min_idx_in_region
             peak_ref_amp = signal_min_in_region
+            if verbose:
+                print(f"  Inverted T wave detected: min_prom={abs_min_prominence:.4f} > max_prom={abs_max_prominence:.4f} * 1.15")
+        elif abs_max_prominence > abs_min_prominence * 0.85:
+            # Normal T wave: positive peak is dominant or comparable
+            morphology = 0
+            peak_ref_idx = signal_max_idx_in_region
+            peak_ref_amp = signal_max_in_region
+            if verbose:
+                print(f"  Normal T wave detected: max_prom={abs_max_prominence:.4f} >= min_prom={abs_min_prominence:.4f} * 0.85")
+        else:
+            # Ambiguous case: check absolute values
+            # If negative peak is significantly larger, prefer inverted
+            if abs_min_val > abs_max_val * 1.25:
+                morphology = 1
+                peak_ref_idx = signal_min_idx_in_region
+                peak_ref_amp = signal_min_in_region
+                if verbose:
+                    print(f"  Inverted T wave (ambiguous case): abs_min={abs_min_val:.4f} > abs_max={abs_max_val:.4f} * 1.25")
+            else:
+                morphology = 0
+                peak_ref_idx = signal_max_idx_in_region
+                peak_ref_amp = signal_max_in_region
+                if verbose:
+                    print(f"  Normal T wave (ambiguous case): abs_max={abs_max_val:.4f} >= abs_min={abs_min_val:.4f} / 1.25")
     else:
         # Fallback: use derivative-based determination
         if ymax > 0 and ymin <= 0:
