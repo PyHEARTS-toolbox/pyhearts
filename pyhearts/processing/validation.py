@@ -90,44 +90,63 @@ def log_peak_result(
         return None, None
 
     # Polarity checks
-    # Step 5: Allow negative P-waves and T-waves for inverted leads
-    # Negative T-waves are physiologically valid (common in certain leads and conditions)
+    # Step 5: Allow negative P-waves and T-waves for inverted leads or detrended signals
     if expected_polarity == "peak" and height < 0 and comp in ("P", "T"):
-        # For both P-waves and T-waves, allow negative (inverted leads)
-        if verbose:
-            print(f"[Cycle {cycle_idx}]: {comp}-wave is negative (inverted lead), accepting anyway.")
-        # Accept negative P/T-wave (inverted lead) - continue to amplitude check
+        # For P-waves, allow negative if it's the only detection (inverted leads)
+        # For T-waves, also allow negative - detrended signals can make positive T waves appear negative
+        # The morphology detection algorithm handles this, so we should accept what it detects
+        if comp == "P":
+            if verbose:
+                print(f"[Cycle {cycle_idx}]: P-wave is negative (inverted lead), accepting anyway.")
+            # Accept negative P-wave (inverted lead)
+        else:
+            # T-waves: accept negative (can be due to detrending or truly inverted)
+            # The morphology detection algorithm determines this, so trust its judgment
+            if verbose:
+                print(f"[Cycle {cycle_idx}]: T-wave is negative (inverted or detrended signal), accepting anyway.")
+            # Accept negative T-wave
     if expected_polarity == "trough" and height >= 0 and comp in ("Q", "S"):
         if verbose:
             print(f"[Cycle {cycle_idx}]: {comp} polarity invalid (expected negative).")
         return None, None
 
     # Relative amplitude check against R
-    # For T waves, use more lenient threshold (ECGPUWAVE doesn't validate by signal amplitude)
-    # T waves can be smaller after detrending/filtering, so we use a lower threshold
     if r_height is not None and np.isfinite(r_height):
         r_abs = float(abs(r_height))
         ratios = (
             cfg.amp_min_ratio  # type: ignore[attr-defined]
             if (cfg is not None and hasattr(cfg, "amp_min_ratio"))
-            else {"P": 0.03, "T": 0.02, "Q": 0.005, "S": 0.005}  # T: 2% instead of 3%
+            else {"P": 0.03, "T": 0.03, "Q": 0.005, "S": 0.005}
         )
         min_ratio = ratios.get(comp)
-        
-        # For T waves, use even more lenient threshold (1.5% instead of 2%)
-        # ECGPUWAVE validates T waves using derivative amplitude, not signal amplitude
-        # So we should be more permissive for T waves detected via derivative method
-        if comp == "T":
-            min_ratio = min_ratio * 0.75  # Reduce threshold by 25% for T waves (1.5% of R)
 
-        if min_ratio is not None and abs(float(height)) < min_ratio * r_abs:
-            if verbose:
-                need = min_ratio * r_abs
-                print(
-                    f"[Cycle {cycle_idx}]: {comp} too small "
-                    f"({abs(float(height)):.3f} < {need:.3f})."
-                )
-            return None, None
+        if min_ratio is not None:
+            # For T waves in detrended signals, use a more lenient threshold
+            # Detrended signals have smaller amplitudes, so T waves can be valid even if < 3% of R
+            if comp == "T":
+                # Use lower threshold for T waves: 0.5% of R amplitude, or absolute minimum of 0.005 mV
+                # This accounts for detrended signals where amplitudes are significantly reduced
+                t_min_ratio = 0.005  # 0.5% instead of 3% (very lenient for detrended signals)
+                t_abs_min = 0.005  # Absolute minimum in mV (very small to allow detrended signals)
+                t_threshold = max(t_min_ratio * r_abs, t_abs_min)
+                
+                if abs(float(height)) < t_threshold:
+                    if verbose:
+                        print(
+                            f"[Cycle {cycle_idx}]: {comp} too small "
+                            f"({abs(float(height)):.3f} < {t_threshold:.3f})."
+                        )
+                    return None, None
+            else:
+                # For other components, use original threshold
+                if abs(float(height)) < min_ratio * r_abs:
+                    if verbose:
+                        need = min_ratio * r_abs
+                        print(
+                            f"[Cycle {cycle_idx}]: {comp} too small "
+                            f"({abs(float(height)):.3f} < {need:.3f})."
+                        )
+                    return None, None
 
     return center_idx, float(height)
 
@@ -179,9 +198,6 @@ def validate_peak_temporal_order(
     # Check ordering: each peak should come before the next in expected order
     detected_components = [comp for comp in expected_order if comp in peak_indices]
     
-    # Track which components are problematic
-    problematic_components = set()
-    
     for i in range(len(detected_components) - 1):
         curr_comp = detected_components[i]
         next_comp = detected_components[i + 1]
@@ -194,14 +210,11 @@ def validate_peak_temporal_order(
                 f"comes after or at {next_comp} (idx={next_idx})"
             )
             errors.append(error_msg)
-            # Mark both components as problematic (one is too early, one is too late)
-            problematic_components.add(curr_comp)
-            problematic_components.add(next_comp)
             if verbose:
                 print(f"[Cycle {cycle_idx}]: {error_msg}")
     
     is_valid = len(errors) == 0
-    return is_valid, errors, problematic_components
+    return is_valid, errors
 
 
 def validate_intervals_physiological(
@@ -274,7 +287,7 @@ def validate_cycle_physiology(
     sampling_rate: float,
     verbose: bool = False,
     cycle_idx: Optional[int] = None,
-) -> Tuple[bool, Dict[str, Union[List[str], set]]]:
+) -> Tuple[bool, Dict[str, List[str]]]:
     """
     Comprehensive physiological validation for a single cycle.
     
@@ -297,25 +310,21 @@ def validate_cycle_physiology(
     
     Returns
     -------
-    Tuple[bool, Dict[str, Union[List[str], set]]]
+    Tuple[bool, Dict[str, List[str]]]
         - bool: True if cycle passes all validations, False otherwise.
-        - Dict with keys:
-          - 'peak_ordering': List of error messages
-          - 'intervals': List of error messages
-          - 'problematic_components': Set of component names with ordering issues
+        - Dict[str, List[str]]: Dictionary with 'peak_ordering' and 'intervals' keys,
+          each containing a list of error messages (empty if valid).
     """
     all_errors = {
         'peak_ordering': [],
         'intervals': [],
-        'problematic_components': set(),
     }
     
     # Validate peak temporal ordering
-    order_valid, order_errors, problematic_components = validate_peak_temporal_order(
+    order_valid, order_errors = validate_peak_temporal_order(
         peak_data, verbose=verbose, cycle_idx=cycle_idx
     )
     all_errors['peak_ordering'] = order_errors
-    all_errors['problematic_components'] = problematic_components
     
     # Validate intervals
     interval_valid, interval_errors = validate_intervals_physiological(

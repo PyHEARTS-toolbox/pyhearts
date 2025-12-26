@@ -279,6 +279,7 @@ class PyHEARTS:
             verbose=self.verbose,
             cfg=self.cfg,
             precomputed_peaks=precomputed_peaks,
+            original_r_peaks=self.r_peak_indices if hasattr(self, 'r_peak_indices') else None,
         )
 
 

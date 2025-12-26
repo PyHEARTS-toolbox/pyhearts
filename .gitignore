@@ -138,6 +138,21 @@ T_PEAK_ANALYSIS_REPORT.md
 *_COMPLETE.md
 *_FIXES.md
 *_ANALYSIS_REPORT.md
+*_ANALYSIS*.md
+*_ANALYSIS_RESULTS.md
+*_COMPARISON.md
+*_DETECTION*.md
+*_DIAGNOSIS.md
+*_EXPLANATION.md
+*_FIX*.md
+*_IMPLEMENTATION.md
+*_PERFORMANCE*.md
+*_REPORT.md
+*_RESULTS.md
+*_SELECTION*.md
+*_UPDATE.md
+*_VS_*.md
+WHY_*.md
 
 # Plot images (generated files)
 *.png
@@ -162,6 +177,12 @@ selected_leads.csv
 *_pyhearts.csv
 t_peak_analysis_results.csv
 *_t_wave_analysis.png
+*_analysis_results.csv
+*_detection_analysis.csv
+*_failure_investigation.csv
+*_subjects_analysis.csv
+sel*_epochs_*.csv
+sel*_output_*.csv
 
 # Build artifacts
 pyhearts.egg-info/
@@ -176,23 +197,21 @@ ecgpuwave-*/
 # Development/utility scripts (not part of the toolbox)
 process_qtdb_full.py
 verify_installation.py
-analyze_zero_t_peaks.py
-debug_t_peak_detection.py
-plot_problematic_subjects.py
-plot_sel104_peaks.py
-test_sel102_amplitude.py
+analyze_*.py
+check_*.py
+compare_*.py
+debug_*.py
+diagnose_*.py
+evaluate_*.py
+investigate_*.py
+plot_*.py
+regenerate_*.py
+run_*.py
+test_original_*.py
+test_sel*.py
 
 # Example/integration files (not part of the toolbox)
 pyhearts/processing/adaptive_threshold_integration_example.py
-
-# Analysis and documentation files (non-toolbox)
-ADAPTIVE_THRESHOLD_IMPLEMENTATION.md
-ECGPUWAVE_T_DETECTION_ANALYSIS.md
-T_PEAK_ANALYSIS_REPORT.md
-
-# Analysis output CSV files
-t_peak_analysis_results.csv
-*_analysis_results.csv
 
 # Specific plot images (already covered by *.png but being explicit)
 sel102_t_wave_analysis.png

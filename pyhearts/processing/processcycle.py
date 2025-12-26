@@ -1,5 +1,4 @@
 from __future__ import annotations
-from typing import Optional
 
 ##PyHEARTS IMPORTS
 import numpy as np
@@ -95,7 +94,7 @@ def process_cycle(
     verbose=False,
     cfg: ProcessCycleConfig | None = None,
     precomputed_peaks: dict | None = None,
-    next_r_global_center_idx: Optional[int] = None,
+    original_r_peaks: np.ndarray | None = None,
 ):
 
     cfg = cfg or ProcessCycleConfig()  # safe default
@@ -417,8 +416,36 @@ def process_cycle(
                 print(f"[Cycle {cycle_idx}]: sig_detrended is invalid (empty or NaNs). Skipping this cycle.")
             return output_dict, previous_r_global_center_idx, previous_p_global_center_idx, None, None
 
-        r_center_idx = int(np.argmax(sig_detrended))
+        # R Peak Detection: Handle both upright and inverted R peaks
+        # Use absolute value to find the peak with maximum magnitude, regardless of polarity
+        # This is more robust than argmax/argmin alone and handles variable R peak timing
+        sig_abs = np.abs(sig_detrended)
+        r_center_idx = int(np.argmax(sig_abs))
         r_height = sig_detrended[r_center_idx]
+        
+        # Optional: Use cycle center as a sanity check/refinement if available
+        # This helps with very noisy signals but shouldn't override the absolute value method
+        cycle_start_global = int(one_cycle["index"].iloc[0])
+        cycle_end_global = int(one_cycle["index"].iloc[-1])
+        cycle_center_global = (cycle_start_global + cycle_end_global) // 2
+        cycle_center_rel = cycle_center_global - cycle_start_global
+        
+        # If the absolute value peak is far from cycle center (>50ms), check if cycle center is better
+        # This handles cases where detrending creates artifacts
+        max_distance_samples = int(round(50.0 * sampling_rate / 1000.0))
+        if abs(r_center_idx - cycle_center_rel) > max_distance_samples:
+            if 0 <= cycle_center_rel < len(sig_detrended):
+                cycle_center_abs = abs(sig_detrended[cycle_center_rel])
+                # Only use cycle center if it's within 20% of the absolute peak
+                if cycle_center_abs >= 0.8 * sig_abs[r_center_idx]:
+                    if verbose:
+                        print(f"[Cycle {cycle_idx}]: Using cycle center for R peak (abs peak too far: {abs(r_center_idx - cycle_center_rel)} samples)")
+                    r_center_idx = cycle_center_rel
+                    r_height = sig_detrended[r_center_idx]
+        
+        if verbose:
+            r_polarity = "INVERTED" if r_height < 0 else "UPRIGHT"
+            print(f"[Cycle {cycle_idx}]: R peak detected at {r_center_idx} (cycle-rel), value: {r_height:.4f} mV ({r_polarity})")
 
         # ------------------------------------------------------
         # Step 2: R Peak Stdev and Dynamic Offset
@@ -841,29 +868,11 @@ def process_cycle(
                 t_start_idx = r_center_idx + int(round(ecgpuwave_t_start_offset_ms * sampling_rate / 1000.0))
                 t_start_idx = max(0, min(t_start_idx, n - 2))
                 
-                # ECGPUWAVE end window (ewind) depends on RR interval:
-                # - If RR > 900ms: ewind=800ms
-                # - If RR > 800ms: ewind=600ms  
-                # - If RR > 600ms: ewind=450ms
-                # - Otherwise: ewind=450ms
-                # For simplicity, use 450ms as default (covers most cases)
-                # But also check if next R is available to limit the window
+                # ECGPUWAVE end window (ewind) - use fixed 450ms window
+                # This covers most normal cases
                 ecgpuwave_t_end_offset_ms = 450.0  # ECGPUWAVE's default ewind
-                t_end_from_r = r_center_idx + int(round(ecgpuwave_t_end_offset_ms * sampling_rate / 1000.0))
-                
-                # If we have next R peak info, limit window to 210ms before next R (ECGPUWAVE's limit)
-                # Otherwise use the fixed window
-                # NOTE: Temporarily disabled next R limiting to debug - it may be causing issues
-                # if next_r_global_center_idx is not None:
-                #     # Convert next R to cycle-relative if needed
-                #     cycle_start_global = int(one_cycle["index"].iloc[0]) if not one_cycle.empty else 0
-                #     next_r_cycle_rel = next_r_global_center_idx - cycle_start_global
-                #     if next_r_cycle_rel > t_start_idx:  # Only limit if next R is after search start
-                #         t_end_idx = min(n - 1, next_r_cycle_rel - int(round(210.0 * sampling_rate / 1000.0)))
-                #     else:
-                #         t_end_idx = min(n - 1, t_end_from_r)
-                # else:
-                t_end_idx = min(n - 1, t_end_from_r)
+                t_end_idx = r_center_idx + int(round(ecgpuwave_t_end_offset_ms * sampling_rate / 1000.0))
+                t_end_idx = min(n - 1, t_end_idx)
                 
                 # Ensure minimum window size
                 min_t_window_ms = 100.0
@@ -903,6 +912,8 @@ def process_cycle(
                             s_end_idx=s_end_for_t,
                             sampling_rate=sampling_rate,
                             verbose=verbose,
+                            r_peak_idx=r_center_idx,
+                            r_peak_value=r_height,
                         )
                     )
                     
@@ -1629,25 +1640,23 @@ def process_cycle(
         if verbose:
             print(f"[Cycle {cycle_idx}]: ⚠️  Physiological validation FAILED - invalidating problematic values")
         
-        # If peak ordering is violated, invalidate only the problematic peaks
+        # If peak ordering is violated, invalidate the problematic peaks
         if validation_errors.get('peak_ordering'):
-            problematic_components = validation_errors.get('problematic_components', set())
-            if problematic_components:
-                if verbose:
-                    print(f"[Cycle {cycle_idx}]: Invalidating problematic peaks due to ordering violations: {problematic_components}")
-                # Only invalidate the specific peaks that have ordering issues
-                # Don't invalidate R (R is critical and should be preserved if detected)
-                # Don't invalidate peaks that are correctly ordered (e.g., T if only P has issues)
-                for comp in problematic_components:
-                    if comp != "R" and comp in peak_data:  # Never invalidate R
-                        # Set center indices and related values to NaN in output_dict
-                        for key_suffix in ["_global_center_idx", "_global_le_idx", "_global_ri_idx", 
-                                           "_center_voltage", "_le_voltage", "_ri_voltage"]:
-                            key = f"{comp}{key_suffix}"
-                            if key in output_dict:
-                                if verbose:
-                                    print(f"[Cycle {cycle_idx}]: Setting {key} to NaN due to ordering violation")
-                                output_dict[key][cycle_idx] = np.nan
+            if verbose:
+                print(f"[Cycle {cycle_idx}]: Invalidating peaks due to ordering violations")
+            # Invalidate all peaks except R (R is critical and should be preserved if detected)
+            # This is a conservative approach - if ordering is wrong, we can't trust the other peaks
+            problematic_components = ["P", "Q", "S", "T"]
+            for comp in problematic_components:
+                if comp in peak_data:
+                    # Set center indices and related values to NaN in output_dict
+                    for key_suffix in ["_global_center_idx", "_global_le_idx", "_global_ri_idx", 
+                                       "_center_voltage", "_le_voltage", "_ri_voltage"]:
+                        key = f"{comp}{key_suffix}"
+                        if key in output_dict:
+                            if verbose:
+                                print(f"[Cycle {cycle_idx}]: Setting {key} to NaN due to ordering violation")
+                            output_dict[key][cycle_idx] = np.nan
         
         # If intervals are out of physiological range, set them to NaN
         if validation_errors.get('intervals'):
