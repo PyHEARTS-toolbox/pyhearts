@@ -152,7 +152,29 @@ def epoch_ecg(
         return pd.DataFrame(columns=["signal_x", "signal_y", "index", "cycle"]), None
 
     all_cycles_arr = np.vstack(all_cycles)
-    global_template = np.mean(all_cycles_arr, axis=0)
+    
+    # Handle mixed-polarity signals: create template using absolute values
+    # This prevents inverted and upright cycles from canceling each other out
+    # For mixed-polarity signals, we normalize each cycle to its dominant polarity
+    # before creating the template
+    cycles_for_template = []
+    for cycle in all_cycles_arr:
+        # Normalize cycle to have positive peak (flip if needed)
+        if np.max(np.abs(cycle)) > 0:
+            # Check if cycle is predominantly negative
+            if np.min(cycle) < -np.max(cycle):
+                cycle_normalized = -cycle
+            else:
+                cycle_normalized = cycle
+            cycles_for_template.append(cycle_normalized)
+        else:
+            cycles_for_template.append(cycle)
+    
+    if cycles_for_template:
+        global_template = np.mean(np.vstack(cycles_for_template), axis=0)
+    else:
+        global_template = np.mean(all_cycles_arr, axis=0)
+    
     ecg_var = float(np.var(ecg))
 
     epochs_rows: List[dict] = []
@@ -161,9 +183,77 @@ def epoch_ecg(
     r_latencies: List[float] = []  # kept for possible downstream use
 
     # --- Filter cycles by correlation and variance ---
-    for cycle, meta in zip(all_cycles_arr, all_metadata):
-        corr = np.corrcoef(cycle, global_template)[0, 1]
-        if np.isnan(corr) or corr < corr_thresh:
+    # For mixed-polarity signals, create separate templates for inverted and upright cycles
+    # Check R peak values directly (before detrending) to detect mixed polarity
+    r_peak_values = ecg[r_peaks]
+    baseline = np.median(ecg)
+    r_peak_polarities = (r_peak_values - baseline) < 0  # True if inverted
+    has_mixed_polarity = len(set(r_peak_polarities)) > 1 if len(r_peak_polarities) > 0 else False
+    
+    # Create polarity-specific templates for mixed-polarity signals
+    if has_mixed_polarity:
+        if verbose:
+            print(f"Mixed-polarity signal detected: creating separate templates for inverted and upright cycles")
+        
+        # Separate cycles by polarity
+        inverted_cycles = []
+        upright_cycles = []
+        inverted_indices = []
+        upright_indices = []
+        
+        for i, (cycle, meta) in enumerate(zip(all_cycles_arr, all_metadata)):
+            r_peak_idx = r_peaks[meta["idx"]]
+            is_inverted = (ecg[r_peak_idx] - baseline) < 0
+            if is_inverted:
+                inverted_cycles.append(cycle)
+                inverted_indices.append(i)
+            else:
+                upright_cycles.append(cycle)
+                upright_indices.append(i)
+        
+        # Create separate templates
+        if inverted_cycles:
+            inverted_template = np.mean(np.vstack(inverted_cycles), axis=0)
+        else:
+            inverted_template = global_template
+        
+        if upright_cycles:
+            upright_template = np.mean(np.vstack(upright_cycles), axis=0)
+        else:
+            upright_template = global_template
+    else:
+        # Single-polarity signal - use global template
+        inverted_template = global_template
+        upright_template = global_template
+        inverted_indices = []
+        upright_indices = []
+    
+    # Lower correlation threshold for mixed-polarity signals
+    effective_corr_thresh = corr_thresh
+    if has_mixed_polarity:
+        # Lower threshold by 0.15 for mixed-polarity (0.70 -> 0.55)
+        effective_corr_thresh = max(0.5, corr_thresh - 0.15)
+        if verbose:
+            print(f"Lowering correlation threshold from {corr_thresh:.2f} to {effective_corr_thresh:.2f}")
+    
+    for i, (cycle, meta) in enumerate(zip(all_cycles_arr, all_metadata)):
+        # For mixed-polarity, use the appropriate template based on cycle polarity
+        if has_mixed_polarity:
+            r_peak_idx = r_peaks[meta["idx"]]
+            is_inverted = (ecg[r_peak_idx] - baseline) < 0
+            template_to_use = inverted_template if is_inverted else upright_template
+        else:
+            template_to_use = global_template
+        
+        # Normalize cycle for correlation (flip if needed to match template)
+        cycle_for_corr = cycle.copy()
+        if np.max(np.abs(cycle)) > 0:
+            # Check if cycle is predominantly negative
+            if np.min(cycle) < -np.max(cycle):
+                cycle_for_corr = -cycle_for_corr
+        
+        corr = np.corrcoef(cycle_for_corr, template_to_use)[0, 1]
+        if np.isnan(corr) or corr < effective_corr_thresh:
             continue
         if np.var(cycle) > var_thresh * ecg_var:
             continue

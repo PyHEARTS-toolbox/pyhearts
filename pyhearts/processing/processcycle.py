@@ -131,9 +131,21 @@ def process_cycle(
     # ============================================================================================
     # CASE 1: Use previous Gaussian  features if available
     # ============================================================================================
+    # Check if previous cycle has all essential peaks (P, R, T)
+    # If missing any essential peak, fall back to CASE 2 (full detection)
+    use_case1 = False
     if previous_gauss_features is not None and isinstance(previous_gauss_features, dict) and len(previous_gauss_features) > 0:
-        if verbose:
-            print(f"[Cycle {cycle_idx}]: CASE 1: Previous labeled Gaussian  features found. Using for bounds.")
+        essential_peaks = ["P", "R", "T"]
+        missing_essential = [peak for peak in essential_peaks if peak not in previous_gauss_features]
+        if len(missing_essential) == 0:
+            use_case1 = True
+            if verbose:
+                print(f"[Cycle {cycle_idx}]: CASE 1: Previous labeled Gaussian features found with all essential peaks (P, R, T). Using for bounds.")
+        else:
+            if verbose:
+                print(f"[Cycle {cycle_idx}]: CASE 1 skipped: Previous cycle missing essential peaks: {missing_essential}. Falling back to CASE 2 (full detection).")
+    
+    if use_case1:
 
         bound_factor = cfg.bound_factor 
         peak_labels = list(previous_gauss_features.keys())
@@ -489,14 +501,46 @@ def process_cycle(
                 print(f"[Cycle {cycle_idx}]: Adjusted S max index to within signal bounds: {s_end}")
 
         # --- Q Peak ---
-        # Automatic detection: Skip Q/S detection if sampling rate < 300 Hz
-        # At lower sampling rates, Q and S peaks may not be reliably detectable
-        # due to insufficient temporal resolution
+        # For P wave validation: Always attempt Q detection (even below 300 Hz)
+        # ECGPUWave uses Q peak position to distinguish P waves from Q peaks
+        # We use a simplified Q detection for validation purposes
         MIN_SAMPLING_RATE_FOR_QS = 300.0
         
+        # Simplified Q detection for validation (runs even below 300 Hz)
+        # This helps distinguish P waves from Q peaks (ECGPUWave approach)
+        # For validation, we use a lenient approach - just find the minimum before R
+        # This helps identify if a detected "P" is actually a Q peak
+        q_center_idx_for_validation = None
+        if r_center_idx is not None:
+            # Search for Q peak in narrow window before R (0-100ms before R)
+            # This is sufficient for validation - we just need to know if Q exists near R
+            q_search_window_ms = 100.0
+            q_search_start = max(0, r_center_idx - int(round(q_search_window_ms * sampling_rate / 1000.0)))
+            q_search_end = r_center_idx
+            
+            if q_search_end - q_search_start >= 3:  # Need at least 3 samples
+                # Simple Q detection: find minimum in narrow window before R
+                # Use lenient criteria for validation - just find the most negative point
+                q_search_segment = sig_detrended[q_search_start:q_search_end]
+                if len(q_search_segment) > 0:
+                    q_local_idx = int(np.argmin(q_search_segment))
+                    q_center_idx_for_validation = q_search_start + q_local_idx
+                    q_height_for_validation = sig_detrended[q_center_idx_for_validation]
+                    
+                    # Very lenient validation: Q should be negative (trough)
+                    # For validation purposes, we accept any negative point before R
+                    # This helps catch cases where P is misclassified as Q
+                    if q_height_for_validation >= 0:
+                        # If minimum is positive, there's no Q peak (signal is rising to R)
+                        q_center_idx_for_validation = None
+                    # Otherwise, accept it as a potential Q for validation
+        
+        # Full Q detection (only for signals >= 300 Hz, stored in output)
         if sampling_rate < MIN_SAMPLING_RATE_FOR_QS:
             if verbose:
-                print(f"[Cycle {cycle_idx}]: Skipping Q peak detection (sampling rate {sampling_rate:.1f} Hz < {MIN_SAMPLING_RATE_FOR_QS} Hz)")
+                print(f"[Cycle {cycle_idx}]: Skipping full Q peak detection (sampling rate {sampling_rate:.1f} Hz < {MIN_SAMPLING_RATE_FOR_QS} Hz)")
+                if q_center_idx_for_validation is not None:
+                    print(f"[Cycle {cycle_idx}]: Q peak detected for validation only at idx {q_center_idx_for_validation}")
             q_center_idx, q_height = None, None
         else:
             # Ensure Q search is before R (fix temporal order violations)
@@ -520,14 +564,29 @@ def process_cycle(
 
             if q_center_idx is None and verbose:
                 print(f"[Cycle {cycle_idx}]: Q peak rejected — not included in fit.")
+            
+            # Use validation Q if full detection failed but validation found one
+            if q_center_idx is None and q_center_idx_for_validation is not None:
+                q_center_idx = q_center_idx_for_validation
+                q_height = q_height_for_validation
+                if verbose:
+                    print(f"[Cycle {cycle_idx}]: Using validation Q peak for full detection")
+        
+        # For validation purposes, use whichever Q detection succeeded
+        q_center_idx_for_p_validation = q_center_idx if q_center_idx is not None else q_center_idx_for_validation
 
         # --- P Peak ---
         # Check if precomputed peaks are available
         p_center_idx, p_height = None, None
         p_onset_idx, p_offset_idx = None, None
         
+        if verbose:
+            print(f"[Cycle {cycle_idx}]: P detection: Checking precomputed peaks. precomputed_peaks={precomputed_peaks is not None}, cycle_idx in precomputed_peaks={precomputed_peaks is not None and cycle_idx in precomputed_peaks if precomputed_peaks is not None else False}")
+        
         if precomputed_peaks is not None and cycle_idx in precomputed_peaks:
             p_annotation = precomputed_peaks[cycle_idx].get('P')
+            if verbose:
+                print(f"[Cycle {cycle_idx}]: P detection: p_annotation={p_annotation is not None}")
             if p_annotation is not None:
                 # Use precomputed P-wave annotation
                 # Map from global signal indices to cycle-relative indices
@@ -553,35 +612,92 @@ def process_cycle(
                     else:
                         # Peak outside cycle array bounds, skip precomputed detection
                         p_center_idx = None
+                        if verbose:
+                            print(f"[Cycle {cycle_idx}]: P detection: Precomputed P peak outside cycle array bounds, setting p_center_idx=None")
                 else:
                     # Peak outside cycle boundaries, skip precomputed detection
                     p_center_idx = None
+                    if verbose:
+                        print(f"[Cycle {cycle_idx}]: P detection: Precomputed P peak outside cycle boundaries, setting p_center_idx=None")
+        
+        if verbose:
+            print(f"[Cycle {cycle_idx}]: P detection: After precomputed check, p_center_idx={p_center_idx}")
         
         # If precomputed peaks didn't provide a P-wave, use standard detection
         if p_center_idx is None:
-            p_peak_end_idx = q_center_idx if q_center_idx is not None else r_center_idx        
+            if verbose:
+                print(f"[Cycle {cycle_idx}]: P detection: p_center_idx is None, attempting standard detection")
+            # Use Q for P search window if available (from full detection or simplified validation)
+            # This is critical: Q position helps bound P search window correctly
+            # ECGPUWave uses Q to distinguish P from Q - we should too
+            p_peak_end_idx = q_center_idx if q_center_idx is not None else q_center_idx_for_p_validation
+            if verbose:
+                print(f"[Cycle {cycle_idx}]: P detection: q_center_idx={q_center_idx}, q_center_idx_for_p_validation={q_center_idx_for_p_validation}, p_peak_end_idx={p_peak_end_idx}")
+            if p_peak_end_idx is None:
+                # Fallback to R if no Q detected
+                p_peak_end_idx = r_center_idx
+                if verbose:
+                    print(f"[Cycle {cycle_idx}]: P detection: Using R as fallback, r_center_idx={r_center_idx}, p_peak_end_idx={p_peak_end_idx}")
+            
             if p_peak_end_idx is None or p_peak_end_idx < 2:
                 if verbose:
-                    print(f"[Cycle {cycle_idx}]: Cannot search for P peak — missing Q/R bounds.")
+                    print(f"[Cycle {cycle_idx}]: Cannot search for P peak — missing Q/R bounds (p_peak_end_idx={p_peak_end_idx}).")
                 p_center_idx, p_height = None, None
             else:
-                pre_qrs_len = int(p_peak_end_idx)
-        
-            # Narrow P-wave search window: search in the last 120ms before QRS (reduced from full pre-QRS)
-            # This prevents detecting noise or artifacts far from the QRS complex
-            max_p_window_ms = cfg.shape_max_window_ms.get("P", 120)
-            max_p_window_samples = int(round(max_p_window_ms * sampling_rate / 1000.0))
-            start_idx = max(0, pre_qrs_len - max_p_window_samples)
-        
-            if pre_qrs_len - start_idx < 2:
                 if verbose:
-                    print(f"[Cycle {cycle_idx}]: P window too small (start={start_idx}, end={pre_qrs_len}).")
-                p_center_idx, p_height = None, None
-            else:
-                # Apply band-pass filter for P-wave detection
-                # This enhances P-wave visibility while preserving morphology
-                # Step 3: Add fallback to unfiltered signal if band-pass fails
-                p_center_idx, p_height = None, None
+                    print(f"[Cycle {cycle_idx}]: P detection: p_peak_end_idx={p_peak_end_idx}, proceeding with P search")
+                pre_qrs_len = int(p_peak_end_idx)
+                
+                # ECGPUWave-style P wave detection:
+                # 1. Search from previous R peak (or use wider window if not available)
+                # 2. End search with minimum distance from current R peak (60-80ms safety margin)
+                # 3. This prevents P from encroaching on R peak and improves timing accuracy
+                
+                # Minimum distance from R peak (safety margin to prevent encroachment)
+                min_p_to_r_distance_ms = 60.0  # Minimum 60ms before R peak
+                min_p_to_r_distance_samples = int(round(min_p_to_r_distance_ms * sampling_rate / 1000.0))
+                
+                # End search window before R peak with safety margin
+                search_end_idx = max(0, pre_qrs_len - min_p_to_r_distance_samples)
+                
+                # Determine search start: prefer previous R peak, fallback to wider window
+                if previous_r_global_center_idx is not None:
+                    # Map previous R peak to cycle-relative index
+                    cycle_start_global = int(one_cycle["index"].iloc[0]) if "index" in one_cycle.columns else int(one_cycle["signal_x"].iloc[0])
+                    previous_r_cycle_relative = previous_r_global_center_idx - cycle_start_global
+                    
+                    if previous_r_cycle_relative >= 0 and previous_r_cycle_relative < len(sig_detrended):
+                        # Search from previous R peak (ECGPUWave approach)
+                        search_start_idx = previous_r_cycle_relative
+                        if verbose:
+                            print(f"[Cycle {cycle_idx}]: P search from previous R peak at cycle idx {search_start_idx}")
+                    else:
+                        # Previous R outside cycle, use wider window
+                        max_p_window_ms = cfg.shape_max_window_ms.get("P", 250)  # Increased from 200 to 250ms for better detection
+                        max_p_window_samples = int(round(max_p_window_ms * sampling_rate / 1000.0))
+                        search_start_idx = max(0, search_end_idx - max_p_window_samples)
+                        if verbose:
+                            print(f"[Cycle {cycle_idx}]: P search from wider window (previous R outside cycle)")
+                else:
+                    # No previous R available, use wider window
+                    max_p_window_ms = cfg.shape_max_window_ms.get("P", 250)  # Increased from 200 to 250ms for better detection
+                    max_p_window_samples = int(round(max_p_window_ms * sampling_rate / 1000.0))
+                    search_start_idx = max(0, search_end_idx - max_p_window_samples)
+                    if verbose:
+                        print(f"[Cycle {cycle_idx}]: P search from wider window (no previous R)")
+                
+                start_idx = search_start_idx
+                pre_qrs_len = search_end_idx  # Update to use safety-margin-adjusted end
+            
+                if pre_qrs_len - start_idx < 2:
+                    if verbose:
+                        print(f"[Cycle {cycle_idx}]: P window too small (start={start_idx}, end={pre_qrs_len}).")
+                    p_center_idx, p_height = None, None
+                else:
+                    # Apply band-pass filter for P-wave detection
+                    # This enhances P-wave visibility while preserving morphology
+                    # Step 3: Add fallback to unfiltered signal if band-pass fails
+                    p_center_idx, p_height = None, None
                 
                 if cfg.pwave_use_bandpass:
                     # Filter a larger segment to avoid edge artifacts, then extract the original window
@@ -634,6 +750,16 @@ def process_cycle(
                             use_derivative=True,  # Use derivative-based detection
                         )
                         
+                        # Fallback: if derivative-based detection fails, try simple argmax
+                        if p_center_idx_pos is None:
+                            p_segment = sig_for_p_detection[start_idx:pre_qrs_len]
+                            if len(p_segment) > 0:
+                                p_local_max = int(np.argmax(p_segment))
+                                p_center_idx_pos = start_idx + p_local_max
+                                p_height_pos = sig_for_p_detection[p_center_idx_pos]
+                                if verbose:
+                                    print(f"[Cycle {cycle_idx}]: P peak found via fallback argmax at index {p_center_idx_pos}")
+                        
                         # Also try negative P-wave (inverted lead)
                         p_center_idx_neg, p_height_neg, _ = find_peaks(
                             signal=sig_for_p_detection,
@@ -646,6 +772,16 @@ def process_cycle(
                             cycle_idx=cycle_idx,
                             use_derivative=True,  # Use derivative-based detection
                         )
+                        
+                        # Fallback: if derivative-based detection fails, try simple argmin
+                        if p_center_idx_neg is None:
+                            p_segment = sig_for_p_detection[start_idx:pre_qrs_len]
+                            if len(p_segment) > 0:
+                                p_local_min = int(np.argmin(p_segment))
+                                p_center_idx_neg = start_idx + p_local_min
+                                p_height_neg = sig_for_p_detection[p_center_idx_neg]
+                                if verbose:
+                                    print(f"[Cycle {cycle_idx}]: P peak found via fallback argmin at index {p_center_idx_neg}")
                         
                         # Choose the one with larger absolute amplitude
                         if p_center_idx_pos is not None and p_center_idx_neg is not None:
@@ -734,6 +870,16 @@ def process_cycle(
                         use_derivative=True,  # Use derivative-based detection
                     )
                     
+                    # Fallback: if derivative-based detection fails, try simple argmax
+                    if p_center_idx_pos is None:
+                        p_segment = sig_for_p_detection[start_idx:pre_qrs_len]
+                        if len(p_segment) > 0:
+                            p_local_max = int(np.argmax(p_segment))
+                            p_center_idx_pos = start_idx + p_local_max
+                            p_height_pos = sig_for_p_detection[p_center_idx_pos]
+                            if verbose:
+                                print(f"[Cycle {cycle_idx}]: P peak found via fallback argmax at index {p_center_idx_pos}")
+                    
                     p_center_idx_neg, p_height_neg, _ = find_peaks(
                         signal=sig_for_p_detection,
                         xs=xs_rel_idxs,
@@ -745,6 +891,16 @@ def process_cycle(
                         cycle_idx=cycle_idx,
                         use_derivative=True,  # Use derivative-based detection
                     )
+                    
+                    # Fallback: if derivative-based detection fails, try simple argmin
+                    if p_center_idx_neg is None:
+                        p_segment = sig_for_p_detection[start_idx:pre_qrs_len]
+                        if len(p_segment) > 0:
+                            p_local_min = int(np.argmin(p_segment))
+                            p_center_idx_neg = start_idx + p_local_min
+                            p_height_neg = sig_for_p_detection[p_center_idx_neg]
+                            if verbose:
+                                print(f"[Cycle {cycle_idx}]: P peak found via fallback argmin at index {p_center_idx_neg}")
                     
                     # Choose the one with larger absolute amplitude
                     if p_center_idx_pos is not None and p_center_idx_neg is not None:
@@ -947,7 +1103,27 @@ def process_cycle(
             "T": (t_center_idx, t_height),
         }
         
-        # Validate peak
+        # Morphology-based validation for P waves (before standard validation)
+        # This helps distinguish P waves from Q peaks even when Q detection fails
+        if p_center_idx is not None and p_height is not None:
+            from pyhearts.processing.validation import validate_p_wave_morphology
+            p_morphology_valid, p_morphology_features = validate_p_wave_morphology(
+                signal=sig_detrended,
+                p_center_idx=p_center_idx,
+                p_height=p_height,
+                sampling_rate=sampling_rate,
+                r_center_idx=r_center_idx,
+                verbose=verbose,
+                cycle_idx=cycle_idx,
+            )
+            if not p_morphology_valid:
+                # Morphology validation failed - reject P wave
+                if verbose:
+                    print(f"[Cycle {cycle_idx}]: P wave rejected by morphology validation")
+                p_center_idx, p_height = None, None
+                peaks["P"] = (None, None)  # Update peaks dict
+        
+        # Validate peak (pass Q center for P wave validation)
         validated = validate_peaks(
             peaks=peaks,
             r_center_idx=r_center_idx,
@@ -956,6 +1132,7 @@ def process_cycle(
             verbose=verbose,
             cycle_idx=cycle_idx,
             cfg=cfg,
+            q_center_idx_for_validation=q_center_idx_for_p_validation,  # Pass Q for P validation
         )
         
         # Build final guess dict (add R, filter invalid, keep verbose logging)
@@ -1698,6 +1875,32 @@ def process_cycle(
         if verbose:
             total_errors = len(validation_errors.get('peak_ordering', [])) + len(validation_errors.get('intervals', []))
             print(f"[Cycle {cycle_idx}]: Total validation errors: {total_errors}")
+    
+    # Update previous_gauss_features to only include peaks that are still valid after validation
+    # This ensures that if a peak (e.g., P) is invalidated, the next cycle won't use CASE 1
+    # Check which peaks are valid by looking at output_dict (after validation)
+    if previous_gauss_features is not None:
+        essential_peaks = ["P", "R", "T"]
+        valid_peaks_in_output = []
+        for peak in essential_peaks:
+            global_center_key = f"{peak}_global_center_idx"
+            if global_center_key in output_dict:
+                center_val = output_dict[global_center_key][cycle_idx]
+                # Check if peak is valid (not None and not NaN)
+                if center_val is not None and not (isinstance(center_val, float) and np.isnan(center_val)):
+                    valid_peaks_in_output.append(peak)
+        
+        # Only keep peaks in previous_gauss_features that are still valid
+        if len(valid_peaks_in_output) < len(essential_peaks):
+            # Some essential peaks were invalidated - remove them from previous_gauss_features
+            missing_peaks = [p for p in essential_peaks if p not in valid_peaks_in_output]
+            if verbose:
+                print(f"[Cycle {cycle_idx}]: Removing invalidated peaks from previous_gauss_features: {missing_peaks}")
+            # Create new previous_gauss_features without invalidated peaks
+            updated_previous_gauss_features = {k: v for k, v in previous_gauss_features.items() if k in valid_peaks_in_output or k not in essential_peaks}
+            previous_gauss_features = updated_previous_gauss_features if len(updated_previous_gauss_features) > 0 else None
+            if verbose and previous_gauss_features is None:
+                print(f"[Cycle {cycle_idx}]: All essential peaks invalidated - next cycle will use CASE 2")
     
     # Update prevs for next cycle
     previous_r_global_center_idx = r_global_center_idx

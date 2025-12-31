@@ -77,6 +77,36 @@ def find_peak_derivative_based(
         sign_changes = np.diff(np.sign(deriv))
         zero_crossings = np.where(sign_changes > 0)[0]  # positive transition
     
+    # If no zero-crossings found, try more lenient detection:
+    # Look for local maxima/minima in the derivative (not just zero-crossings)
+    # This helps detect small or noisy P waves
+    if len(zero_crossings) == 0:
+        # Fallback: find local extrema in derivative
+        # For positive peaks: find where derivative is maximum (most positive before going negative)
+        # For negative peaks: find where derivative is minimum (most negative before going positive)
+        if polarity == "positive":
+            # Find local maxima in derivative (where signal is rising fastest)
+            # These indicate potential positive peaks
+            local_maxima = []
+            for i in range(1, len(deriv) - 1):
+                if deriv[i] > deriv[i-1] and deriv[i] > deriv[i+1] and deriv[i] > 0:
+                    local_maxima.append(i)
+            if len(local_maxima) > 0:
+                # Use the largest local maximum
+                max_deriv_idx = local_maxima[np.argmax([deriv[i] for i in local_maxima])]
+                zero_crossings = np.array([max_deriv_idx])
+        else:
+            # Find local minima in derivative (where signal is falling fastest)
+            # These indicate potential negative peaks
+            local_minima = []
+            for i in range(1, len(deriv) - 1):
+                if deriv[i] < deriv[i-1] and deriv[i] < deriv[i+1] and deriv[i] < 0:
+                    local_minima.append(i)
+            if len(local_minima) > 0:
+                # Use the smallest local minimum
+                min_deriv_idx = local_minima[np.argmin([deriv[i] for i in local_minima])]
+                zero_crossings = np.array([min_deriv_idx])
+    
     if len(zero_crossings) == 0:
         if verbose and label:
             print(f"[Cycle {cycle_idx}]: No {polarity} peaks found via derivative method for {label}")

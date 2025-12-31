@@ -153,6 +153,8 @@ T_PEAK_ANALYSIS_REPORT.md
 *_UPDATE.md
 *_VS_*.md
 WHY_*.md
+ECGPUWAVE*.md
+QRS_CHARACTERISTIC*.md
 
 # Plot images (generated files)
 *.png
@@ -183,6 +185,9 @@ t_peak_analysis_results.csv
 *_subjects_analysis.csv
 sel*_epochs_*.csv
 sel*_output_*.csv
+accuracy_analysis_results.csv
+rpeak_detection_analysis.csv
+underperforming_subjects_analysis.csv
 
 # Build artifacts
 pyhearts.egg-info/
@@ -209,12 +214,11 @@ regenerate_*.py
 run_*.py
 test_original_*.py
 test_sel*.py
+visualize_*.py
 
 # Example/integration files (not part of the toolbox)
 pyhearts/processing/adaptive_threshold_integration_example.py
 
-# Specific plot images (already covered by *.png but being explicit)
-sel102_t_wave_analysis.png
-sel104_t_wave_analysis.png
-sel104_peaks_plot.png
+# Analysis/documentation directories (non-toolbox)
+p_peak_analysis/
 

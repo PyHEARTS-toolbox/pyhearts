@@ -12,6 +12,188 @@ Peaks = Mapping[str, Peak]
 ValidatedPeaks = Dict[str, Peak]
 
 
+def validate_p_wave_morphology(
+    signal: np.ndarray,
+    p_center_idx: int,
+    p_height: float,
+    sampling_rate: float,
+    r_center_idx: Optional[int] = None,
+    verbose: bool = False,
+    cycle_idx: Optional[int] = None,
+) -> Tuple[bool, Dict[str, float]]:
+    """
+    Validate P wave morphology to distinguish P waves from Q peaks.
+    
+    ECGPUWave-style validation using:
+    1. Duration: P waves are 60-200ms wide, Q peaks are 20-40ms
+    2. Shape: P waves have gradual rise/fall (low max derivative), Q peaks are sharp (high derivative)
+    3. Onset/Offset detection: P waves should have detectable onset and offset points
+    
+    Parameters
+    ----------
+    signal : np.ndarray
+        ECG signal segment containing the P wave candidate.
+    p_center_idx : int
+        Index of the P wave peak candidate.
+    p_height : float
+        Amplitude of the P wave candidate.
+    sampling_rate : float
+        Sampling rate in Hz.
+    r_center_idx : int, optional
+        R peak index (for distance validation).
+    verbose : bool, default False
+        If True, print diagnostic messages.
+    cycle_idx : int, optional
+        Cycle index for logging.
+    
+    Returns
+    -------
+    Tuple[bool, Dict[str, float]]
+        (is_valid, morphology_features)
+        - is_valid: True if morphology suggests P wave, False if likely Q peak
+        - morphology_features: dict with duration_ms, max_derivative, sharpness_ratio
+    """
+    if p_center_idx < 0 or p_center_idx >= len(signal):
+        return False, {}
+    
+    # Define search window around P peak
+    # P waves are typically 60-200ms wide, so search ±150ms
+    search_window_ms = 150.0
+    search_window_samples = int(round(search_window_ms * sampling_rate / 1000.0))
+    
+    search_start = max(0, p_center_idx - search_window_samples)
+    search_end = min(len(signal), p_center_idx + search_window_samples + 1)
+    
+    if search_end - search_start < 10:  # Need at least 10 samples
+        if verbose:
+            print(f"[Cycle {cycle_idx}]: P morphology validation failed - window too small")
+        return False, {}
+    
+    # Extract segment around P peak
+    segment = signal[search_start:search_end]
+    p_local_idx = p_center_idx - search_start
+    
+    # Compute derivative to assess sharpness
+    # Q peaks are sharp (high derivative), P waves are gradual (low derivative)
+    derivative = np.gradient(segment)
+    abs_derivative = np.abs(derivative)
+    
+    # Find maximum derivative magnitude (sharpness indicator)
+    max_derivative = float(np.max(abs_derivative))
+    
+    # Normalize by P wave amplitude to get sharpness ratio
+    # Q peaks have high sharpness (derivative/amplitude), P waves have low sharpness
+    if abs(p_height) > 0:
+        sharpness_ratio = max_derivative / abs(p_height)
+    else:
+        sharpness_ratio = float('inf')
+    
+    # Detect onset and offset using derivative-based method
+    # More robust: use derivative to find where signal starts rising/falling
+    # Compute local baseline around P peak (median of ±50ms window)
+    baseline_window_ms = 50.0
+    baseline_window_samples = int(round(baseline_window_ms * sampling_rate / 1000.0))
+    baseline_start = max(0, p_local_idx - baseline_window_samples)
+    baseline_end = min(len(segment), p_local_idx + baseline_window_samples + 1)
+    local_baseline = np.median(segment[baseline_start:baseline_end])
+    
+    # Use 10% of peak-to-baseline difference as threshold (more lenient)
+    peak_to_baseline = abs(p_height - local_baseline)
+    threshold = peak_to_baseline * 0.10
+    
+    # Find onset (left side): search backwards from peak until signal returns to baseline
+    onset_idx = p_local_idx
+    for i in range(p_local_idx - 1, -1, -1):
+        signal_value = segment[i]
+        distance_from_baseline = abs(signal_value - local_baseline)
+        if distance_from_baseline > threshold:
+            # Still above threshold, continue
+            continue
+        else:
+            # Returned to baseline, this is the onset
+            onset_idx = i
+            break
+    
+    # Find offset (right side): search forwards from peak until signal returns to baseline
+    offset_idx = p_local_idx
+    for i in range(p_local_idx + 1, len(segment)):
+        signal_value = segment[i]
+        distance_from_baseline = abs(signal_value - local_baseline)
+        if distance_from_baseline > threshold:
+            # Still above threshold, continue
+            continue
+        else:
+            # Returned to baseline, this is the offset
+            offset_idx = i
+            break
+    
+    # Calculate duration
+    duration_samples = offset_idx - onset_idx
+    duration_ms = (duration_samples / sampling_rate) * 1000.0
+    
+    # Morphology validation criteria (ECGPUWave-style):
+    # 1. Duration: P waves are 30-200ms, Q peaks are 10-30ms
+    # Use lenient minimum (30ms) - some P waves can be short
+    min_p_duration_ms = 30.0  # Very lenient - P waves can be as short as 30ms
+    max_p_duration_ms = 200.0
+    max_q_duration_ms = 30.0  # Q peaks are narrower
+    
+    # 2. Sharpness: P waves have gradual rise/fall (low sharpness), Q peaks are sharp (high sharpness)
+    # Sharpness ratio = max_derivative / amplitude
+    # P waves: typically < 0.5, Q peaks: typically > 1.0
+    max_p_sharpness = 1.5  # Very lenient - allow higher sharpness for P waves
+    min_q_sharpness = 1.0  # Q peaks are sharper
+    
+    # 3. Onset/Offset detection: P waves should have detectable boundaries
+    # If onset/offset are too close to peak, it's likely a Q peak
+    min_boundary_distance_ms = 10.0  # Very lenient - allow 10ms minimum
+    min_boundary_distance_samples = int(round(min_boundary_distance_ms * sampling_rate / 1000.0))
+    
+    onset_distance = p_local_idx - onset_idx
+    offset_distance = offset_idx - p_local_idx
+    
+    # Validation checks: Use combined criteria - reject only if clearly Q peak
+    is_valid = True
+    rejection_reason = None
+    
+    # Primary check: If duration is very short AND sharpness is high, definitely Q peak
+    # This is the strongest indicator of Q peak vs P wave
+    if duration_ms < max_q_duration_ms and sharpness_ratio > min_q_sharpness:
+        is_valid = False
+        rejection_reason = f"Q peak characteristics (duration={duration_ms:.1f}ms < {max_q_duration_ms}ms AND sharpness={sharpness_ratio:.2f} > {min_q_sharpness})"
+    
+    # Secondary check: Very sharp AND very short duration (likely Q peak)
+    # Only reject if both conditions are met (more conservative)
+    elif duration_ms < 20.0 and sharpness_ratio > 1.2:
+        is_valid = False
+        rejection_reason = f"very short and sharp (duration={duration_ms:.1f}ms < 20ms AND sharpness={sharpness_ratio:.2f} > 1.2, likely Q peak)"
+    
+    # Warning for borderline cases (but don't reject)
+    if is_valid:
+        if duration_ms < min_p_duration_ms:
+            if verbose:
+                print(f"[Cycle {cycle_idx}]: P wave warning - duration borderline ({duration_ms:.1f}ms < {min_p_duration_ms}ms), but accepting due to low sharpness")
+        if duration_ms > max_p_duration_ms:
+            if verbose:
+                print(f"[Cycle {cycle_idx}]: P wave warning - duration very wide ({duration_ms:.1f}ms > {max_p_duration_ms}ms)")
+    
+    morphology_features = {
+        "duration_ms": duration_ms,
+        "max_derivative": max_derivative,
+        "sharpness_ratio": sharpness_ratio,
+        "onset_distance_samples": onset_distance,
+        "offset_distance_samples": offset_distance,
+    }
+    
+    if verbose:
+        if is_valid:
+            print(f"[Cycle {cycle_idx}]: P wave morphology validated: duration={duration_ms:.1f}ms, sharpness={sharpness_ratio:.2f}")
+        else:
+            print(f"[Cycle {cycle_idx}]: P wave morphology rejected: {rejection_reason}")
+    
+    return is_valid, morphology_features
+
+
 def validate_peaks(
     peaks: Peaks,
     r_center_idx: int | None,
@@ -21,6 +203,7 @@ def validate_peaks(
     cycle_idx: int | None,
     *,
     cfg: ProcessCycleConfig | None = None,
+    q_center_idx_for_validation: int | None = None,  # Q center for P wave validation (may come from simplified detection)
 ) -> ValidatedPeaks:
     """
     Validate ECG peaks for polarity and minimum amplitude relative to R.
@@ -34,6 +217,8 @@ def validate_peaks(
     verbose : enable per-peak logs
     cycle_idx : cycle number for logs
     cfg : ProcessCycleConfig carrying amp_min_ratio; falls back to defaults if None
+    q_center_idx_for_validation : int | None, optional
+        Q center index for P wave validation (from simplified detection if full Q detection skipped)
 
     Returns
     -------
@@ -47,6 +232,10 @@ def validate_peaks(
         "T": "peak",
     }
 
+    # Use Q from peaks if available, otherwise use validation Q
+    q_center_idx_from_peaks = peaks.get("Q", (None, None))[0]
+    q_center_idx = q_center_idx_from_peaks if q_center_idx_from_peaks is not None else q_center_idx_for_validation
+
     validate_one = partial(
         log_peak_result,
         r_center_idx=r_center_idx,
@@ -55,6 +244,7 @@ def validate_peaks(
         verbose=verbose,
         cycle_idx=cycle_idx,
         cfg=cfg,
+        q_center_idx=q_center_idx,  # Pass Q center for P validation
     )
 
     return {
@@ -79,15 +269,65 @@ def log_peak_result(
     verbose: bool = False,
     cycle_idx: int | None = None,
     cfg: ProcessCycleConfig | None = None,
+    q_center_idx: int | None = None,  # Added for P wave validation
 ) -> Peak:
     """
     Apply polarity and relative-amplitude checks for a single component.
+    
+    For P waves, also validates distance from QRS complex to avoid misclassifying
+    Q peaks as P waves (ECGPUWave-style validation).
     """
     # Missing or invalid amplitude
     if center_idx is None or height is None or not np.isfinite(height):
         if verbose:
             print(f"[Cycle {cycle_idx}]: {comp} peak not found.")
         return None, None
+
+    # ECGPUWave-style P wave validation: reject P waves too close to QRS
+    # This prevents misclassifying inverted Q peaks as P waves when P is absent or too small
+    if comp == "P" and r_center_idx is not None and sampling_rate is not None:
+        p_r_distance_samples = r_center_idx - center_idx
+        p_r_distance_ms = (p_r_distance_samples / sampling_rate) * 1000.0
+        
+        # P waves should be at least 80ms before R peak (to avoid QRS complex)
+        # If P is too close to R (< 80ms), it's likely a Q peak, not a P wave
+        min_p_r_distance_ms = 80.0
+        if p_r_distance_ms < min_p_r_distance_ms:
+            if verbose:
+                print(f"[Cycle {cycle_idx}]: P wave rejected - too close to R peak "
+                      f"({p_r_distance_ms:.1f}ms < {min_p_r_distance_ms}ms). Likely Q peak, not P wave.")
+            return None, None
+        
+        # If Q peak is detected, P should be well before Q (at least 50ms)
+        # ECGPUWave uses Q position to distinguish P from Q - if P is too close to Q,
+        # it's likely a Q peak being misclassified as P (especially for inverted QRS)
+        if q_center_idx is not None:
+            p_q_distance_samples = q_center_idx - center_idx
+            p_q_distance_ms = (p_q_distance_samples / sampling_rate) * 1000.0
+            
+            # Stricter threshold: P should be at least 50ms before Q
+            # If P is within 50ms of Q, it's likely part of the QRS complex, not a true P wave
+            min_p_q_distance_ms = 50.0
+            if p_q_distance_ms < min_p_q_distance_ms:
+                if verbose:
+                    print(f"[Cycle {cycle_idx}]: P wave rejected - too close to Q peak "
+                          f"({p_q_distance_ms:.1f}ms < {min_p_q_distance_ms}ms). Likely Q peak misclassified as P.")
+                return None, None
+            
+            # Additional check: if P-Q distance is very short (< 100ms), be suspicious
+            # True P waves are typically 100-200ms before Q, not 50-100ms
+            if p_q_distance_ms < 100.0:
+                if verbose:
+                    print(f"[Cycle {cycle_idx}]: P wave warning - P-Q distance is short "
+                          f"({p_q_distance_ms:.1f}ms < 100ms). May be Q peak.")
+                # Don't reject, but log warning for now
+        
+        # Morphology-based validation: distinguish P waves from Q peaks using shape/duration
+        # This works even when Q detection fails (e.g., at low sampling rates)
+        # We need the full signal segment for morphology analysis
+        # Note: This requires access to the signal, which we'll need to pass in
+        # For now, we'll skip morphology validation if signal is not available
+        # (This will be called from process_cycle where signal is available)
 
     # Polarity checks
     # Step 5: Allow negative P-waves and T-waves for inverted leads or detrended signals
