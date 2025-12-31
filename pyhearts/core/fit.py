@@ -397,6 +397,8 @@ class PyHEARTS:
                 self.output_df = pd.DataFrame()
                 return self.output_df, self.epochs_df
 
+            # Use peak-level validation (ECGPUWave-style) instead of cycle-level filtering
+            # This processes all detected R-peaks and validates at the peak level
             epochs_df, expected_max_energy = epoch_ecg(
                 ecg_signal,
                 filtered_r_peaks,
@@ -406,6 +408,7 @@ class PyHEARTS:
                 corr_thresh=self.cfg.epoch_corr_thresh,
                 var_thresh=self.cfg.epoch_var_thresh,
                 estimate_energy=True,
+                skip_template_filtering=True,  # ECGPUWave-style: validate at peak level
             )
 
             self.epochs_df = epochs_df

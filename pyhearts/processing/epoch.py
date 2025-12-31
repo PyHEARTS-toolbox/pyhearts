@@ -22,6 +22,7 @@ def epoch_ecg(
     var_thresh: Optional[float] = None,
     estimate_energy: bool = False,
     wavelet_name: str = "db6",
+    skip_template_filtering: bool = False,
 ) -> Tuple[pd.DataFrame, Optional[float]]:
 
     """
@@ -63,8 +64,10 @@ def epoch_ecg(
     -----
     - Cycles are extracted as symmetric windows around each R-peak with half-width
       equal to half the average RR interval.
-    - Cycles are retained if they meet both a correlation (to the global template)
-      and a variance criterion relative to the whole signal.
+    - If skip_template_filtering=False (default), cycles are retained if they meet both
+      a correlation (to the global template) and a variance criterion relative to the whole signal.
+    - If skip_template_filtering=True (ECGPUWave-style), all cycles are retained and validation
+      happens at the peak level during process_cycle (physiological constraints, intervals, SNR).
     """
     # ---- config ----
     if cfg is None:
@@ -175,105 +178,129 @@ def epoch_ecg(
     else:
         global_template = np.mean(all_cycles_arr, axis=0)
     
-    ecg_var = float(np.var(ecg))
-
     epochs_rows: List[dict] = []
     kept_cycles: List[np.ndarray] = []
     kept_metadata: List[dict] = []
     r_latencies: List[float] = []  # kept for possible downstream use
 
-    # --- Filter cycles by correlation and variance ---
-    # For mixed-polarity signals, create separate templates for inverted and upright cycles
-    # Check R peak values directly (before detrending) to detect mixed polarity
-    r_peak_values = ecg[r_peaks]
-    baseline = np.median(ecg)
-    r_peak_polarities = (r_peak_values - baseline) < 0  # True if inverted
-    has_mixed_polarity = len(set(r_peak_polarities)) > 1 if len(r_peak_polarities) > 0 else False
-    
-    # Create polarity-specific templates for mixed-polarity signals
-    if has_mixed_polarity:
+    # --- Filter cycles by correlation and variance (unless skip_template_filtering=True) ---
+    if skip_template_filtering:
+        # ECGPUWave-style: Keep all cycles, validate at peak level instead
         if verbose:
-            print(f"Mixed-polarity signal detected: creating separate templates for inverted and upright cycles")
+            print(f"Skipping template-based filtering (ECGPUWave-style): processing all {len(all_cycles_arr)} cycles")
         
-        # Separate cycles by polarity
-        inverted_cycles = []
-        upright_cycles = []
-        inverted_indices = []
-        upright_indices = []
+        for cycle, meta in zip(all_cycles_arr, all_metadata):
+            # Append rows for this cycle (long-form table)
+            start = meta["start"]
+            x_vals = meta["x_vals"]
+            for i, y in enumerate(cycle):
+                epochs_rows.append(
+                    {
+                        "signal_x": x_vals[i],
+                        "signal_y": float(y),
+                        "index": int(ecg_indices[start + i]),
+                        "cycle": int(meta["idx"]),
+                    }
+                )
+
+            kept_cycles.append(cycle)
+            kept_metadata.append(meta)
+            r_latencies.append(float(meta["r_peak_lat"]))
+    else:
+        # Original PyHEARTS approach: Template-based filtering
+        ecg_var = float(np.var(ecg))
+        
+        # For mixed-polarity signals, create separate templates for inverted and upright cycles
+        # Check R peak values directly (before detrending) to detect mixed polarity
+        r_peak_values = ecg[r_peaks]
+        baseline = np.median(ecg)
+        r_peak_polarities = (r_peak_values - baseline) < 0  # True if inverted
+        has_mixed_polarity = len(set(r_peak_polarities)) > 1 if len(r_peak_polarities) > 0 else False
+        
+        # Create polarity-specific templates for mixed-polarity signals
+        if has_mixed_polarity:
+            if verbose:
+                print(f"Mixed-polarity signal detected: creating separate templates for inverted and upright cycles")
+            
+            # Separate cycles by polarity
+            inverted_cycles = []
+            upright_cycles = []
+            inverted_indices = []
+            upright_indices = []
+            
+            for i, (cycle, meta) in enumerate(zip(all_cycles_arr, all_metadata)):
+                r_peak_idx = r_peaks[meta["idx"]]
+                is_inverted = (ecg[r_peak_idx] - baseline) < 0
+                if is_inverted:
+                    inverted_cycles.append(cycle)
+                    inverted_indices.append(i)
+                else:
+                    upright_cycles.append(cycle)
+                    upright_indices.append(i)
+            
+            # Create separate templates
+            if inverted_cycles:
+                inverted_template = np.mean(np.vstack(inverted_cycles), axis=0)
+            else:
+                inverted_template = global_template
+            
+            if upright_cycles:
+                upright_template = np.mean(np.vstack(upright_cycles), axis=0)
+            else:
+                upright_template = global_template
+        else:
+            # Single-polarity signal - use global template
+            inverted_template = global_template
+            upright_template = global_template
+            inverted_indices = []
+            upright_indices = []
+        
+        # Lower correlation threshold for mixed-polarity signals
+        effective_corr_thresh = corr_thresh
+        if has_mixed_polarity:
+            # Lower threshold by 0.15 for mixed-polarity (0.70 -> 0.55)
+            effective_corr_thresh = max(0.5, corr_thresh - 0.15)
+            if verbose:
+                print(f"Lowering correlation threshold from {corr_thresh:.2f} to {effective_corr_thresh:.2f}")
         
         for i, (cycle, meta) in enumerate(zip(all_cycles_arr, all_metadata)):
-            r_peak_idx = r_peaks[meta["idx"]]
-            is_inverted = (ecg[r_peak_idx] - baseline) < 0
-            if is_inverted:
-                inverted_cycles.append(cycle)
-                inverted_indices.append(i)
+            # For mixed-polarity, use the appropriate template based on cycle polarity
+            if has_mixed_polarity:
+                r_peak_idx = r_peaks[meta["idx"]]
+                is_inverted = (ecg[r_peak_idx] - baseline) < 0
+                template_to_use = inverted_template if is_inverted else upright_template
             else:
-                upright_cycles.append(cycle)
-                upright_indices.append(i)
-        
-        # Create separate templates
-        if inverted_cycles:
-            inverted_template = np.mean(np.vstack(inverted_cycles), axis=0)
-        else:
-            inverted_template = global_template
-        
-        if upright_cycles:
-            upright_template = np.mean(np.vstack(upright_cycles), axis=0)
-        else:
-            upright_template = global_template
-    else:
-        # Single-polarity signal - use global template
-        inverted_template = global_template
-        upright_template = global_template
-        inverted_indices = []
-        upright_indices = []
-    
-    # Lower correlation threshold for mixed-polarity signals
-    effective_corr_thresh = corr_thresh
-    if has_mixed_polarity:
-        # Lower threshold by 0.15 for mixed-polarity (0.70 -> 0.55)
-        effective_corr_thresh = max(0.5, corr_thresh - 0.15)
-        if verbose:
-            print(f"Lowering correlation threshold from {corr_thresh:.2f} to {effective_corr_thresh:.2f}")
-    
-    for i, (cycle, meta) in enumerate(zip(all_cycles_arr, all_metadata)):
-        # For mixed-polarity, use the appropriate template based on cycle polarity
-        if has_mixed_polarity:
-            r_peak_idx = r_peaks[meta["idx"]]
-            is_inverted = (ecg[r_peak_idx] - baseline) < 0
-            template_to_use = inverted_template if is_inverted else upright_template
-        else:
-            template_to_use = global_template
-        
-        # Normalize cycle for correlation (flip if needed to match template)
-        cycle_for_corr = cycle.copy()
-        if np.max(np.abs(cycle)) > 0:
-            # Check if cycle is predominantly negative
-            if np.min(cycle) < -np.max(cycle):
-                cycle_for_corr = -cycle_for_corr
-        
-        corr = np.corrcoef(cycle_for_corr, template_to_use)[0, 1]
-        if np.isnan(corr) or corr < effective_corr_thresh:
-            continue
-        if np.var(cycle) > var_thresh * ecg_var:
-            continue
+                template_to_use = global_template
+            
+            # Normalize cycle for correlation (flip if needed to match template)
+            cycle_for_corr = cycle.copy()
+            if np.max(np.abs(cycle)) > 0:
+                # Check if cycle is predominantly negative
+                if np.min(cycle) < -np.max(cycle):
+                    cycle_for_corr = -cycle_for_corr
+            
+            corr = np.corrcoef(cycle_for_corr, template_to_use)[0, 1]
+            if np.isnan(corr) or corr < effective_corr_thresh:
+                continue
+            if np.var(cycle) > var_thresh * ecg_var:
+                continue
 
-        # Append rows for this retained cycle (long-form table)
-        start = meta["start"]
-        x_vals = meta["x_vals"]
-        for i, y in enumerate(cycle):
-            epochs_rows.append(
-                {
-                    "signal_x": x_vals[i],
-                    "signal_y": float(y),
-                    "index": int(ecg_indices[start + i]),
-                    "cycle": int(meta["idx"]),
-                }
-            )
+            # Append rows for this retained cycle (long-form table)
+            start = meta["start"]
+            x_vals = meta["x_vals"]
+            for i, y in enumerate(cycle):
+                epochs_rows.append(
+                    {
+                        "signal_x": x_vals[i],
+                        "signal_y": float(y),
+                        "index": int(ecg_indices[start + i]),
+                        "cycle": int(meta["idx"]),
+                    }
+                )
 
-        kept_cycles.append(cycle)
-        kept_metadata.append(meta)
-        r_latencies.append(float(meta["r_peak_lat"]))
+            kept_cycles.append(cycle)
+            kept_metadata.append(meta)
+            r_latencies.append(float(meta["r_peak_lat"]))
 
     if verbose:
         print(f"Total R-peaks: {r_peaks.size}")

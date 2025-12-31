@@ -1527,7 +1527,7 @@ def process_cycle(
         if len(valid_components) == 0:
             if verbose:
                 print(f"[Cycle {cycle_idx}]: No valid components after shape extraction.")
-            return output_dict, previous_r_global_center_idx, previous_p_global_center_idx, sig_detrended, peak_data
+            return output_dict, previous_r_global_center_idx, previous_p_global_center_idx, sig_detrended, previous_gauss_features
     
     except Exception as e:
         print(f"[ERROR] [Cycle {cycle_idx}]:  extract_shape_features() failed: {e}")
