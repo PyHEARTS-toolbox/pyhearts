@@ -1,0 +1,12 @@
+T-Peak Accuracy Diagnosis Summary
+================================================================================
+
+Total beats analyzed: 307
+
+Detection rates:
+  Original signal: 307/307 (100.0%)
+  Detrended signal: 307/307 (100.0%)
+
+Mean errors:
+  Original signal: 73.75 ms
+  Detrended signal: 71.65 ms

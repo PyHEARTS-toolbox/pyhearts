@@ -52,6 +52,10 @@ class ProcessCycleConfig:
     pwave_bandpass_high_hz: float = 15.0 # high cutoff frequency (Hz) for P-wave enhancement
     pwave_bandpass_order: int = 4        # filter order for P-wave band-pass
     
+    # ----- Experimental P-peak detection improvements (for testing) -----
+    p_use_training_phase: bool = False   # Enable training-phase adaptive thresholds
+    p_safety_margin_ms: float = 60.0     # Safety margin before Q/R peak (adjustable, default 60ms)
+    
     # ---- Amplitude ratios to avoid noise ---
     # Increased P wave minimum ratio from 0.02 to 0.03 to reduce false positives (low precision issue)
     # Typical P waves are 5-15% of R peak amplitude, so 3% minimum is still lenient but filters very small deflections

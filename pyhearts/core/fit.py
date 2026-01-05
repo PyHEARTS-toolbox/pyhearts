@@ -113,7 +113,7 @@ class PyHEARTS:
     def _metadata_payload(self) -> dict:
         cfg = self._resolved_config()
         cfg_hash = sha256(json.dumps(cfg, sort_keys=True).encode()).hexdigest()
-        return {
+        payload = {
             "pyhearts_version": cfg.get("version"),
             "sampling_rate_hz": self.sampling_rate,
             "verbose": self.verbose,
@@ -127,8 +127,16 @@ class PyHEARTS:
                 "pandas": pd.__version__,
             },
             "git": self._git_info(),
-            "code_sha256": self._code_sha256(),   # <— here
+            "code_sha256": self._code_sha256(),
         }
+        # Add warning flag for Q/S detection quality at lower sampling rates
+        # Q and S waves are narrow, high-frequency components; detection quality
+        # may be reduced at sampling rates below 300 Hz
+        if self.sampling_rate < 300.0:
+            payload["quality_warnings"] = {
+                "q_s_wave_detection": "Q and S wave detection may be impaired at sampling rates below 300 Hz due to reduced temporal resolution"
+            }
+        return payload
     def _save_metadata(self, file_id: str, results_dir: str) -> None:
         path = Path(results_dir) / f"{file_id}_meta.json"
         try:
@@ -239,7 +247,7 @@ class PyHEARTS:
             pairwise_differences=pairwise_differences,
         )
 
-    def process_cycle_wrapper(self, one_cycle: pd.DataFrame, cycle_idx: int, precomputed_peaks: dict | None = None):
+    def process_cycle_wrapper(self, one_cycle: pd.DataFrame, cycle_idx: int, precomputed_peaks: dict | None = None, full_derivative: np.ndarray | None = None):
         """
         Process and extract features from a single ECG cycle.
     
@@ -279,6 +287,7 @@ class PyHEARTS:
             cfg=self.cfg,
             precomputed_peaks=precomputed_peaks,
             original_r_peaks=self.r_peak_indices if hasattr(self, 'r_peak_indices') else None,
+            full_derivative=full_derivative,
         )
 
 
@@ -419,6 +428,33 @@ class PyHEARTS:
             # Precomputed peaks are no longer used (derivative-based detection removed)
             precomputed_peaks = None
             
+            # Compute full-signal derivative for T-peak detection (reduces edge artifacts)
+            # Build full detrended signal from cycles (cycles are already detrended in epoch.py)
+            full_derivative = None
+            if len(cycles) > 0:
+                from pyhearts.processing.derivative_t_detection import compute_filtered_derivative
+                from scipy.signal import detrend as scipy_detrend
+                
+                # Build full signal from cycles
+                max_idx = epochs_df["index"].max()
+                full_signal = np.zeros(int(max_idx) + 1)
+                
+                for cycle_label in cycles:
+                    cycle_data = epochs_df.loc[epochs_df["cycle"] == cycle_label].sort_values('index')
+                    cycle_indices = cycle_data["index"].values.astype(int)
+                    cycle_signal = cycle_data["signal_y"].values
+                    
+                    cycle_start = int(cycle_indices[0])
+                    cycle_end = int(cycle_indices[-1])
+                    full_signal[cycle_start:cycle_end+1] = cycle_signal
+                
+                # Compute derivative on full signal (avoids edge artifacts from filtering cycle segments)
+                full_derivative = compute_filtered_derivative(
+                    full_signal,
+                    self.sampling_rate,
+                    lowpass_cutoff=40.0,
+                )
+            
             component_keys = ["P", "Q", "R", "S", "T"]
             peak_feature_keys = [
                 # Global indices (absolute sample indices)
@@ -495,7 +531,7 @@ class PyHEARTS:
             for cycle_idx, cycle_label in enumerate(cycles):
                 one_cycle = epochs_df.loc[epochs_df["cycle"] == cycle_label]
                 try:
-                    self.process_cycle_wrapper(one_cycle, cycle_idx, precomputed_peaks=precomputed_peaks)
+                    self.process_cycle_wrapper(one_cycle, cycle_idx, precomputed_peaks=precomputed_peaks, full_derivative=full_derivative)
                 except Exception as e:
                     logging.error(f"Error processing cycle {cycle_idx}: {e}")
                     continue

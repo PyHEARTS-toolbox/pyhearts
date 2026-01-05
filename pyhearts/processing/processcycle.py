@@ -95,6 +95,7 @@ def process_cycle(
     cfg: ProcessCycleConfig | None = None,
     precomputed_peaks: dict | None = None,
     original_r_peaks: np.ndarray | None = None,
+    full_derivative: np.ndarray | None = None,
 ):
 
     cfg = cfg or ProcessCycleConfig()  # safe default
@@ -501,79 +502,30 @@ def process_cycle(
                 print(f"[Cycle {cycle_idx}]: Adjusted S max index to within signal bounds: {s_end}")
 
         # --- Q Peak ---
-        # For P wave validation: Always attempt Q detection (even below 300 Hz)
-        # Use Q peak position to distinguish P waves from Q peaks
-        # We use a simplified Q detection for validation purposes
-        MIN_SAMPLING_RATE_FOR_QS = 300.0
-        
-        # Simplified Q detection for validation (runs even below 300 Hz)
-            # This helps distinguish P waves from Q peaks
-        # For validation, we use a lenient approach - just find the minimum before R
-        # This helps identify if a detected "P" is actually a Q peak
-        q_center_idx_for_validation = None
-        if r_center_idx is not None:
-            # Search for Q peak in narrow window before R (0-100ms before R)
-            # This is sufficient for validation - we just need to know if Q exists near R
-            q_search_window_ms = 100.0
-            q_search_start = max(0, r_center_idx - int(round(q_search_window_ms * sampling_rate / 1000.0)))
-            q_search_end = r_center_idx
-            
-            if q_search_end - q_search_start >= 3:  # Need at least 3 samples
-                # Simple Q detection: find minimum in narrow window before R
-                # Use lenient criteria for validation - just find the most negative point
-                q_search_segment = sig_detrended[q_search_start:q_search_end]
-                if len(q_search_segment) > 0:
-                    q_local_idx = int(np.argmin(q_search_segment))
-                    q_center_idx_for_validation = q_search_start + q_local_idx
-                    q_height_for_validation = sig_detrended[q_center_idx_for_validation]
-                    
-                    # Very lenient validation: Q should be negative (trough)
-                    # For validation purposes, we accept any negative point before R
-                    # This helps catch cases where P is misclassified as Q
-                    if q_height_for_validation >= 0:
-                        # If minimum is positive, there's no Q peak (signal is rising to R)
-                        q_center_idx_for_validation = None
-                    # Otherwise, accept it as a potential Q for validation
-        
-        # Full Q detection (only for signals >= 300 Hz, stored in output)
-        if sampling_rate < MIN_SAMPLING_RATE_FOR_QS:
-            if verbose:
-                print(f"[Cycle {cycle_idx}]: Skipping full Q peak detection (sampling rate {sampling_rate:.1f} Hz < {MIN_SAMPLING_RATE_FOR_QS} Hz)")
-                if q_center_idx_for_validation is not None:
-                    print(f"[Cycle {cycle_idx}]: Q peak detected for validation only at idx {q_center_idx_for_validation}")
-            q_center_idx, q_height = None, None
-        else:
-            # Ensure Q search is before R (fix temporal order violations)
-            if q_start is not None and r_center_idx is not None:
-                if q_start >= r_center_idx:
-                    # q_start is after R, which is invalid - search before R instead
-                    q_start = max(0, r_center_idx - int(round(0.1 * sampling_rate)))  # 100ms before R
-                    if verbose:
-                        print(f"[Cycle {cycle_idx}]: Adjusted q_start from invalid position to {q_start} (before R at {r_center_idx})")
-            
-            q_center_idx, q_height, _ = find_peaks(
-                sig_detrended,
-                xs_rel_idxs,
-                q_start,
-                r_center_idx,
-                mode="min",
-                verbose=verbose,
-                label="Q",
-                cycle_idx=cycle_idx,
-            )
-
-            if q_center_idx is None and verbose:
-                print(f"[Cycle {cycle_idx}]: Q peak rejected — not included in fit.")
-            
-            # Use validation Q if full detection failed but validation found one
-            if q_center_idx is None and q_center_idx_for_validation is not None:
-                q_center_idx = q_center_idx_for_validation
-                q_height = q_height_for_validation
+        # Ensure Q search is before R (fix temporal order violations)
+        if q_start is not None and r_center_idx is not None:
+            if q_start >= r_center_idx:
+                # q_start is after R, which is invalid - search before R instead
+                q_start = max(0, r_center_idx - int(round(0.1 * sampling_rate)))  # 100ms before R
                 if verbose:
-                    print(f"[Cycle {cycle_idx}]: Using validation Q peak for full detection")
+                    print(f"[Cycle {cycle_idx}]: Adjusted q_start from invalid position to {q_start} (before R at {r_center_idx})")
         
-        # For validation purposes, use whichever Q detection succeeded
-        q_center_idx_for_p_validation = q_center_idx if q_center_idx is not None else q_center_idx_for_validation
+        q_center_idx, q_height, _ = find_peaks(
+            sig_detrended,
+            xs_rel_idxs,
+            q_start,
+            r_center_idx,
+            mode="min",
+            verbose=verbose,
+            label="Q",
+            cycle_idx=cycle_idx,
+        )
+
+        if q_center_idx is None and verbose:
+            print(f"[Cycle {cycle_idx}]: Q peak rejected — not included in fit.")
+        
+        # For validation purposes, use detected Q
+        q_center_idx_for_p_validation = q_center_idx
 
         # --- P Peak ---
         # Check if precomputed peaks are available
@@ -986,12 +938,8 @@ def process_cycle(
 
      
         # --- S Peak ---
-        # Automatic detection: Skip S detection if sampling rate < 300 Hz
-        if sampling_rate < MIN_SAMPLING_RATE_FOR_QS:
-            if verbose:
-                print(f"[Cycle {cycle_idx}]: Skipping S peak detection (sampling rate {sampling_rate:.1f} Hz < {MIN_SAMPLING_RATE_FOR_QS} Hz)")
-            s_center_idx, s_height = None, None
-        elif r_center_idx is None or s_end is None or s_end <= r_center_idx:
+        # S Peak Detection
+        if r_center_idx is None or s_end is None or s_end <= r_center_idx:
             if verbose:
                 print(f"[Cycle {cycle_idx}]: Cannot search for S peak — invalid R or S window.")
             s_center_idx, s_height = None, None
@@ -1007,7 +955,7 @@ def process_cycle(
                 cycle_idx=cycle_idx,
             )
 
-        if s_center_idx is None and verbose and sampling_rate >= MIN_SAMPLING_RATE_FOR_QS:
+        if s_center_idx is None and verbose:
             print(f"[Cycle {cycle_idx}]: S peak rejected — not included in fit.")
 
         # # --- T Peak ---
@@ -1058,15 +1006,29 @@ def process_cycle(
             else:
                 n = len(sig_detrended)
             
-                # ECGPUWAVE starts T search 100ms after R peak (bwind=100ms)
-                # This avoids detecting peaks in the ST segment or QRS tail
-                ecgpuwave_t_start_offset_ms = 100.0  # ECGPUWAVE's bwind parameter
-                t_start_idx = r_center_idx + int(round(t_start_offset_ms * sampling_rate / 1000.0))
+                # T search starts 100ms after R peak (base: bwind=100ms, like ECGpuwave)
+                # But adjust to S wave end + 20ms if that's later (like ECGpuwave's adjustment)
+                # This ensures search starts AFTER QRS complex ends, avoiding ST segment
+                t_start_offset_ms = 100.0
+                t_start_from_r = r_center_idx + int(round(t_start_offset_ms * sampling_rate / 1000.0))
+                
+                # ECGpuwave adjustment: use S wave end + 20ms if that's later
+                if s_center_idx is not None:
+                    kdis_ms = 20.0  # 20ms margin (like ECGpuwave's kdis)
+                    t_start_from_s = s_center_idx + int(round(kdis_ms * sampling_rate / 1000.0))
+                    t_start_idx = max(t_start_from_r, t_start_from_s)  # Use later of the two
+                    if verbose:
+                        print(f"[Cycle {cycle_idx}]: T search start adjusted: R+100ms={t_start_from_r}, S+20ms={t_start_from_s}, using={t_start_idx}")
+                else:
+                    # Fallback to fixed 100ms if S wave not detected
+                    t_start_idx = t_start_from_r
+                    if verbose:
+                        print(f"[Cycle {cycle_idx}]: T search start: R+100ms={t_start_from_r} (S wave not detected)")
+                
                 t_start_idx = max(0, min(t_start_idx, n - 2))
                 
-                # ECGPUWAVE end window (ewind) - use fixed 450ms window
-                # This covers most normal cases
-                ecgpuwave_t_end_offset_ms = 450.0  # ECGPUWAVE's default ewind
+                # T search end window: fixed 450ms
+                t_end_offset_ms = 450.0
                 t_end_idx = r_center_idx + int(round(t_end_offset_ms * sampling_rate / 1000.0))
                 t_end_idx = min(n - 1, t_end_idx)
                 
@@ -1088,12 +1050,32 @@ def process_cycle(
                         print(f"[Cycle {cycle_idx}]: Using ECGPUWAVE-style T wave detection")
                     
                     # Compute filtered derivative (like ECGPUWAVE's dbuf)
-                    # Use the full detrended signal for better derivative computation
-                    derivative = compute_filtered_derivative(
-                        sig_detrended,
-                        sampling_rate,
-                        lowpass_cutoff=40.0,  # ECGPUWAVE uses 40 Hz low-pass
-                    )
+                    # Use full-signal filtering to avoid edge artifacts from filtering cycle segments
+                    if full_derivative is not None:
+                        # Extract cycle segment from full-signal derivative
+                        cycle_start_global = int(one_cycle["index"].iloc[0]) if "index" in one_cycle.columns else int(one_cycle["signal_x"].iloc[0])
+                        cycle_end_global = int(one_cycle["index"].iloc[-1]) if "index" in one_cycle.columns else int(one_cycle["signal_x"].iloc[-1])
+                        
+                        if cycle_start_global < len(full_derivative) and cycle_end_global < len(full_derivative):
+                            derivative = full_derivative[cycle_start_global:cycle_end_global+1]
+                            # Ensure length matches sig_detrended (should match, but handle edge cases)
+                            if len(derivative) != len(sig_detrended):
+                                min_len = min(len(derivative), len(sig_detrended))
+                                derivative = derivative[:min_len]
+                        else:
+                            # Fallback to cycle-segment filtering if indices are out of bounds
+                            derivative = compute_filtered_derivative(
+                                sig_detrended,
+                                sampling_rate,
+                                lowpass_cutoff=40.0,
+                            )
+                    else:
+                        # Fallback to cycle-segment filtering (backward compatibility)
+                        derivative = compute_filtered_derivative(
+                            sig_detrended,
+                            sampling_rate,
+                            lowpass_cutoff=40.0,  # ECGPUWAVE uses 40 Hz low-pass
+                        )
                     
                     # Detect T wave using ECGPUWAVE method
                     # s_end_idx should be cycle-relative (not global)

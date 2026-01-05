@@ -1,0 +1,13 @@
+Single vs Double Detrending Test Summary
+================================================================================
+
+Total beats analyzed: 307
+
+Detection rates:
+  Single detrending: 307/307 (100.0%)
+  Double detrending: 307/307 (100.0%)
+
+Mean errors:
+  Single detrending: 78.06 ms
+  Double detrending: 71.17 ms
+  Mean difference (double - single): -6.89 ms

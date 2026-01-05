@@ -541,6 +541,13 @@ def detect_t_wave_derivative_based(
     # Use all zero-crossings found in the T wave region
     zero_crossings = all_zero_crossings
     
+    # Use signal apex directly for peak detection to avoid systematic early bias from zero-crossing selection
+    # The signal apex (max/min in T region) is more reliable for peak detection than zero-crossings
+    # which can be affected by noise, filtering artifacts, or multiple crossings
+    t_peak_deriv_idx = signal_apex_idx
+    
+    # Optional: Refine using zero-crossings if very close to apex (within 5 samples)
+    # But prefer signal apex as primary method to avoid early bias
     if len(zero_crossings) > 0:
         # Find zero-crossing closest to signal apex
         distances_to_apex = [abs(zc - signal_apex_idx) for zc in zero_crossings]
@@ -548,26 +555,14 @@ def detect_t_wave_derivative_based(
         closest_zc = zero_crossings[closest_zc_idx]
         distance_to_apex = distances_to_apex[closest_zc_idx]
         
-        # Use zero-crossing if it's close to apex
-        # T peaks are typically within 1-18 samples (up to ~72ms at 250Hz)
-        # Use a reasonable threshold: ~20ms or 5 samples minimum
-        max_apex_distance_samples = max(5, int(round(20.0 * sampling_rate / 1000.0)))
-        # But also allow up to ~80ms if zero-crossing is the only one found
-        max_apex_distance_lenient = int(round(80.0 * sampling_rate / 1000.0))
+        # Only use zero-crossing if it's very close (within 5 samples / ~20ms)
+        # This handles cases where zero-crossing is essentially at the same location as apex
+        max_apex_distance_for_refinement = max(3, int(round(12.0 * sampling_rate / 1000.0)))  # ~12ms
         
-        if distance_to_apex <= max_apex_distance_samples:
-            # Zero-crossing is very close to apex - use it (ECGPUWAVE's primary method)
-            t_peak_deriv_idx = closest_zc
-        elif distance_to_apex <= max_apex_distance_lenient and len(zero_crossings) == 1:
-            # Only one zero-crossing found and it's reasonably close - use it
-            t_peak_deriv_idx = closest_zc
-        else:
-            # Zero-crossing is far from apex - prefer signal apex
-            # This handles cases where zero-crossing is at wrong location (e.g., early ST segment)
-            t_peak_deriv_idx = signal_apex_idx
-    else:
-        # No zero-crossings found - use signal apex directly
-        t_peak_deriv_idx = signal_apex_idx
+        if distance_to_apex <= max_apex_distance_for_refinement:
+            # Zero-crossing is essentially at the apex - can use it for slight refinement
+            # But for systematic bias correction, we prefer signal apex
+            t_peak_deriv_idx = signal_apex_idx  # Still prefer signal apex to avoid early bias
     
     # Get signal amplitude at peak
     if 0 <= t_peak_deriv_idx < len(signal):

@@ -1,0 +1,13 @@
+Filtering Artifacts Test Summary
+================================================================================
+
+Total beats analyzed: 307
+
+Detection rates:
+  Cycle-segment filtering: 307/307 (100.0%)
+  Full-signal filtering: 307/307 (100.0%)
+
+Mean errors:
+  Cycle-segment filtering: 78.06 ms
+  Full-signal filtering: 62.58 ms
+  Mean difference (full-signal - cycle-segment): -15.48 ms
