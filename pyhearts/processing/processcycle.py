@@ -29,6 +29,7 @@ from .derivative_t_detection import (
     compute_filtered_derivative,
     detect_t_wave_derivative_based,
 )
+from .p_wave_detection_fixed_window import detect_p_wave_fixed_window
 
 
 def bandpass_filter_pwave(
@@ -544,6 +545,7 @@ def process_cycle(
         # Check if precomputed peaks are available
         p_center_idx, p_height = None, None
         p_onset_idx, p_offset_idx = None, None
+        expected_polarity = "positive"  # Default, will be updated when P is detected
         
         if verbose:
             print(f"[Cycle {cycle_idx}]: P detection: Checking precomputed peaks. precomputed_peaks={precomputed_peaks is not None}, cycle_idx in precomputed_peaks={precomputed_peaks is not None and cycle_idx in precomputed_peaks if precomputed_peaks is not None else False}")
@@ -592,10 +594,63 @@ def process_cycle(
         if p_center_idx is None:
             if verbose:
                 print(f"[Cycle {cycle_idx}]: P detection: p_center_idx is None, attempting standard detection")
+            
+            # Try fixed-window P wave detection if enabled
+            if cfg is not None and cfg.p_use_ecgpuwave_method:
+                if verbose:
+                    print(f"[Cycle {cycle_idx}]: Using fixed-window P wave detection")
+                
+                # Fixed-window method uses QRS onset - use Q position if available, else R
+                qrs_onset_idx = q_center_idx if q_center_idx is not None else q_center_idx_for_p_validation
+                if qrs_onset_idx is None:
+                    qrs_onset_idx = r_center_idx
+                
+                if qrs_onset_idx is not None and qrs_onset_idx > 0:
+                    # Get previous T end if available (from previous cycle)
+                    previous_t_end_idx = None
+                    if previous_gauss_features is not None and "T" in previous_gauss_features:
+                        # Extract T offset from previous cycle if available
+                        # This is approximate - would need to track T offset from previous cycle
+                        pass
+                    
+                    # Call fixed-window P wave detection
+                    p_peak_idx, p_amplitude, p_onset_idx, p_offset_idx = detect_p_wave_fixed_window(
+                        signal=sig_detrended,
+                        qrs_onset_idx=qrs_onset_idx,
+                        r_peak_idx=r_center_idx,
+                        r_amplitude=r_height,
+                        sampling_rate=sampling_rate,
+                        previous_t_end_idx=previous_t_end_idx,
+                        verbose=verbose,
+                        cycle_idx=cycle_idx,
+                    )
+                    
+                    if p_peak_idx is not None:
+                        p_center_idx = p_peak_idx
+                        p_height = p_amplitude
+                        if p_onset_idx is not None:
+                            p_onset_idx = p_onset_idx
+                        if p_offset_idx is not None:
+                            p_offset_idx = p_offset_idx
+                        # Determine expected polarity from detected P wave
+                        if p_height >= 0:
+                            expected_polarity = "positive"
+                        else:
+                            expected_polarity = "negative"
+                        if verbose:
+                            print(f"[Cycle {cycle_idx}]: Fixed-window P wave detected: peak={p_center_idx}, amplitude={p_height:.4f}")
+                    else:
+                        if verbose:
+                            print(f"[Cycle {cycle_idx}]: Fixed-window P wave detection failed, falling back to standard method")
+                else:
+                    if verbose:
+                        print(f"[Cycle {cycle_idx}]: Cannot use fixed-window method - missing QRS onset (qrs_onset_idx={qrs_onset_idx})")
+            
             # Use Q for P search window if available (from full detection or simplified validation)
             # This is critical: Q position helps bound P search window correctly
-            # ECGPUWave uses Q to distinguish P from Q - we should too
-            p_peak_end_idx = q_center_idx if q_center_idx is not None else q_center_idx_for_p_validation
+            # Use Q position to distinguish P from Q (helps bound search window correctly)
+            if p_center_idx is None:  # Only use standard method if fixed-window method didn't find a peak
+                p_peak_end_idx = q_center_idx if q_center_idx is not None else q_center_idx_for_p_validation
             if verbose:
                 print(f"[Cycle {cycle_idx}]: P detection: q_center_idx={q_center_idx}, q_center_idx_for_p_validation={q_center_idx_for_p_validation}, p_peak_end_idx={p_peak_end_idx}")
             if p_peak_end_idx is None:
@@ -613,7 +668,7 @@ def process_cycle(
                     print(f"[Cycle {cycle_idx}]: P detection: p_peak_end_idx={p_peak_end_idx}, proceeding with P search")
                 pre_qrs_len = int(p_peak_end_idx)
                 
-                # ECGPUWave-style P wave detection:
+                # Standard P wave detection:
                 # 1. Search from previous R peak (or use wider window if not available)
                 # 2. End search with minimum distance from current R peak (60-80ms safety margin)
                 # 3. This prevents P from encroaching on R peak and improves timing accuracy
@@ -626,7 +681,7 @@ def process_cycle(
                 search_end_idx = max(0, pre_qrs_len - min_p_to_r_distance_samples)
                 
                 # Determine search start: prefer previous R peak, fallback to wider window
-                # ECGPUWave-style: search from previous R to current R (entire R-R interval)
+                # Search from previous R to current R (entire R-R interval)
                 if previous_r_global_center_idx is not None:
                     # Map previous R peak to cycle-relative index
                     cycle_start_global = int(one_cycle["index"].iloc[0]) if "index" in one_cycle.columns else int(one_cycle["signal_x"].iloc[0])

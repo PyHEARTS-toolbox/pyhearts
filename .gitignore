@@ -221,4 +221,5 @@ pyhearts/processing/adaptive_threshold_integration_example.py
 
 # Analysis/documentation directories (non-toolbox)
 p_peak_analysis/
+reviewer_response/
 

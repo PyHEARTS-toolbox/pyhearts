@@ -56,6 +56,7 @@ class ProcessCycleConfig:
     p_use_training_phase: bool = False   # Enable training-phase adaptive thresholds
     p_use_training_as_primary: bool = False  # Use training thresholds as PRIMARY validation (vs secondary check)
     p_safety_margin_ms: float = 60.0     # Safety margin before Q/R peak (adjustable, default 60ms)
+    p_use_ecgpuwave_method: bool = False  # Use fixed-window P wave detection (1-60 Hz filter, fixed search window, derivative zero-crossing)
     
     # ---- Amplitude ratios to avoid noise ---
     # Increased P wave minimum ratio from 0.02 to 0.03 to reduce false positives (low precision issue)
