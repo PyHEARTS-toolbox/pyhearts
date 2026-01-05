@@ -289,13 +289,15 @@ def log_peak_result(
         p_r_distance_samples = r_center_idx - center_idx
         p_r_distance_ms = (p_r_distance_samples / sampling_rate) * 1000.0
         
-        # P waves should be at least 80ms before R peak (to avoid QRS complex)
-        # If P is too close to R (< 80ms), it's likely a Q peak, not a P wave
-        min_p_r_distance_ms = 80.0
+        # P waves should be at least 120ms before R peak (to avoid QRS complex and Q peaks)
+        # Typical P-R intervals are 120-200ms. If P is too close to R (< 120ms), 
+        # it's likely a Q peak or QRS artifact, not a P wave.
+        # Increased from 80ms to 120ms to reduce false positives (low precision issue)
+        min_p_r_distance_ms = 120.0
         if p_r_distance_ms < min_p_r_distance_ms:
             if verbose:
                 print(f"[Cycle {cycle_idx}]: P wave rejected - too close to R peak "
-                      f"({p_r_distance_ms:.1f}ms < {min_p_r_distance_ms}ms). Likely Q peak, not P wave.")
+                      f"({p_r_distance_ms:.1f}ms < {min_p_r_distance_ms}ms). Likely Q peak or QRS artifact, not P wave.")
             return None, None
         
         # If Q peak is detected, P should be well before Q (at least 50ms)
@@ -332,7 +334,7 @@ def log_peak_result(
     # Polarity checks
     # Step 5: Allow negative P-waves and T-waves for inverted leads or detrended signals
     # For T-waves: Accept both positive and negative (detrending can change apparent polarity)
-    # The morphology detection in detect_t_wave_ecgpuwave_style handles true morphology
+    # The morphology detection in detect_t_wave_derivative_based handles true morphology
     if expected_polarity == "peak" and height < 0 and comp in ("P", "T"):
         # For P-waves, allow negative if it's the only detection (inverted leads)
         # For T-waves, always accept negative - detrended signals can make positive T waves appear negative,

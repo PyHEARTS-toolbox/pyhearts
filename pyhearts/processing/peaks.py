@@ -12,7 +12,7 @@ def find_peak_derivative_based(
     cycle_idx: Optional[int] = None
 ) -> Tuple[Optional[int], Optional[float]]:
     """
-    Find peak using derivative-based method (ECGPUWAVE-style).
+    Find peak using derivative-based method.
     
     Finds peaks by locating zero-crossings in the first derivative:
     - Positive peaks: derivative goes from positive to negative (rising to falling)

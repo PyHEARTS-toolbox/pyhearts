@@ -473,7 +473,7 @@ def find_waveform_limit_derivative(
     direction: str = "left",  # "left" for onset, "right" for offset
 ) -> int:
     """
-    Find waveform limit using derivative-based approach (ECGPUWAVE-style).
+    Find waveform limit using derivative-based approach.
     
     Detects the point where signal slope/curvature changes significantly
     relative to local baseline, rather than using fixed threshold.

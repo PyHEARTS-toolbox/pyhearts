@@ -24,10 +24,10 @@ from .validation import (
 )
 from .waveletoffset import calc_wavelet_dynamic_offset
 from .snrgate import gate_by_local_mad
-from .adaptive_threshold import gate_by_adaptive_threshold_ecgpuwave_style
-from .ecgpuwave_t_detection import (
+from .adaptive_threshold import gate_by_adaptive_threshold
+from .derivative_t_detection import (
     compute_filtered_derivative,
-    detect_t_wave_ecgpuwave_style,
+    detect_t_wave_derivative_based,
 )
 
 
@@ -502,12 +502,12 @@ def process_cycle(
 
         # --- Q Peak ---
         # For P wave validation: Always attempt Q detection (even below 300 Hz)
-        # ECGPUWave uses Q peak position to distinguish P waves from Q peaks
+        # Use Q peak position to distinguish P waves from Q peaks
         # We use a simplified Q detection for validation purposes
         MIN_SAMPLING_RATE_FOR_QS = 300.0
         
         # Simplified Q detection for validation (runs even below 300 Hz)
-        # This helps distinguish P waves from Q peaks (ECGPUWave approach)
+            # This helps distinguish P waves from Q peaks
         # For validation, we use a lenient approach - just find the minimum before R
         # This helps identify if a detected "P" is actually a Q peak
         q_center_idx_for_validation = None
@@ -661,30 +661,51 @@ def process_cycle(
                 search_end_idx = max(0, pre_qrs_len - min_p_to_r_distance_samples)
                 
                 # Determine search start: prefer previous R peak, fallback to wider window
+                # ECGPUWave-style: search from previous R to current R (entire R-R interval)
                 if previous_r_global_center_idx is not None:
                     # Map previous R peak to cycle-relative index
                     cycle_start_global = int(one_cycle["index"].iloc[0]) if "index" in one_cycle.columns else int(one_cycle["signal_x"].iloc[0])
                     previous_r_cycle_relative = previous_r_global_center_idx - cycle_start_global
                     
                     if previous_r_cycle_relative >= 0 and previous_r_cycle_relative < len(sig_detrended):
-                        # Search from previous R peak (ECGPUWave approach)
+                        # Search from previous R peak (full R-R interval)
                         search_start_idx = previous_r_cycle_relative
                         if verbose:
-                            print(f"[Cycle {cycle_idx}]: P search from previous R peak at cycle idx {search_start_idx}")
+                            print(f"[Cycle {cycle_idx}]: P search from previous R peak at cycle idx {search_start_idx} (full R-R interval)")
                     else:
-                        # Previous R outside cycle, use wider window
-                        max_p_window_ms = cfg.shape_max_window_ms.get("P", 250)  # Increased from 200 to 250ms for better detection
+                        # Previous R outside cycle, estimate RR interval or use physiological maximum
+                        estimated_rr_ms = None
+                        if original_r_peaks is not None and len(original_r_peaks) >= 2:
+                            # Estimate RR interval from detected R peaks
+                            rr_intervals = np.diff(original_r_peaks) / sampling_rate * 1000.0
+                            # Use median RR interval, clamped to physiological range (500-1500ms)
+                            estimated_rr_ms = np.clip(np.median(rr_intervals), 500.0, 1500.0)
+                        
+                        max_p_window_ms = estimated_rr_ms if estimated_rr_ms is not None else cfg.shape_max_window_ms.get("P", 1200)
                         max_p_window_samples = int(round(max_p_window_ms * sampling_rate / 1000.0))
                         search_start_idx = max(0, search_end_idx - max_p_window_samples)
                         if verbose:
-                            print(f"[Cycle {cycle_idx}]: P search from wider window (previous R outside cycle)")
+                            if estimated_rr_ms is not None:
+                                print(f"[Cycle {cycle_idx}]: P search from estimated RR interval ({estimated_rr_ms:.1f}ms) - previous R outside cycle")
+                            else:
+                                print(f"[Cycle {cycle_idx}]: P search from max window ({max_p_window_ms:.1f}ms) - previous R outside cycle")
                 else:
-                    # No previous R available, use wider window
-                    max_p_window_ms = cfg.shape_max_window_ms.get("P", 250)  # Increased from 200 to 250ms for better detection
+                    # No previous R available, estimate RR interval or use physiological maximum
+                    estimated_rr_ms = None
+                    if original_r_peaks is not None and len(original_r_peaks) >= 2:
+                        # Estimate RR interval from detected R peaks
+                        rr_intervals = np.diff(original_r_peaks) / sampling_rate * 1000.0
+                        # Use median RR interval, clamped to physiological range (500-1500ms)
+                        estimated_rr_ms = np.clip(np.median(rr_intervals), 500.0, 1500.0)
+                    
+                    max_p_window_ms = estimated_rr_ms if estimated_rr_ms is not None else cfg.shape_max_window_ms.get("P", 1200)
                     max_p_window_samples = int(round(max_p_window_ms * sampling_rate / 1000.0))
                     search_start_idx = max(0, search_end_idx - max_p_window_samples)
                     if verbose:
-                        print(f"[Cycle {cycle_idx}]: P search from wider window (no previous R)")
+                        if estimated_rr_ms is not None:
+                            print(f"[Cycle {cycle_idx}]: P search from estimated RR interval ({estimated_rr_ms:.1f}ms) - no previous R available")
+                        else:
+                            print(f"[Cycle {cycle_idx}]: P search from max window ({max_p_window_ms:.1f}ms) - no previous R available")
                 
                 start_idx = search_start_idx
                 pre_qrs_len = search_end_idx  # Update to use safety-margin-adjusted end
@@ -721,12 +742,31 @@ def process_cycle(
                         )
                         
                         # Extract original window from filtered segment (ignore edge padding)
-                        edge_ignore_start = filter_padding_samples
-                        edge_ignore_end = len(p_search_filtered_large) - filter_padding_samples
-                        if edge_ignore_end > edge_ignore_start:
-                            p_search_filtered = p_search_filtered_large[edge_ignore_start:edge_ignore_end]
+                        # Calculate padding actually used (may be less if at signal boundaries)
+                        actual_padding_left = start_idx - filter_start
+                        actual_padding_right = filter_end - pre_qrs_len
+                        
+                        # Extract the portion corresponding to the original search window
+                        extract_start = actual_padding_left
+                        extract_end = len(p_search_filtered_large) - actual_padding_right
+                        
+                        if extract_end > extract_start:
+                            p_search_filtered = p_search_filtered_large[extract_start:extract_end]
                         else:
                             p_search_filtered = p_search_filtered_large
+                        
+                        # Ensure extracted segment matches expected window size
+                        expected_size = pre_qrs_len - start_idx
+                        if len(p_search_filtered) != expected_size:
+                            if verbose:
+                                print(f"[Cycle {cycle_idx}]: Warning: Filtered segment size ({len(p_search_filtered)}) doesn't match expected window size ({expected_size}), adjusting...")
+                            # Adjust to match expected size
+                            if len(p_search_filtered) > expected_size:
+                                p_search_filtered = p_search_filtered[:expected_size]
+                            else:
+                                # Pad if too short (shouldn't happen, but handle gracefully)
+                                padding_needed = expected_size - len(p_search_filtered)
+                                p_search_filtered = np.pad(p_search_filtered, (0, padding_needed), mode='edge')
                         
                         # Map back to full signal indices for find_peaks
                         sig_for_p_detection = sig_detrended.copy()
@@ -1021,13 +1061,13 @@ def process_cycle(
                 # ECGPUWAVE starts T search 100ms after R peak (bwind=100ms)
                 # This avoids detecting peaks in the ST segment or QRS tail
                 ecgpuwave_t_start_offset_ms = 100.0  # ECGPUWAVE's bwind parameter
-                t_start_idx = r_center_idx + int(round(ecgpuwave_t_start_offset_ms * sampling_rate / 1000.0))
+                t_start_idx = r_center_idx + int(round(t_start_offset_ms * sampling_rate / 1000.0))
                 t_start_idx = max(0, min(t_start_idx, n - 2))
                 
                 # ECGPUWAVE end window (ewind) - use fixed 450ms window
                 # This covers most normal cases
                 ecgpuwave_t_end_offset_ms = 450.0  # ECGPUWAVE's default ewind
-                t_end_idx = r_center_idx + int(round(ecgpuwave_t_end_offset_ms * sampling_rate / 1000.0))
+                t_end_idx = r_center_idx + int(round(t_end_offset_ms * sampling_rate / 1000.0))
                 t_end_idx = min(n - 1, t_end_idx)
                 
                 # Ensure minimum window size
@@ -1060,7 +1100,7 @@ def process_cycle(
                     s_end_for_t = s_center_idx if s_center_idx is not None else None
                     
                     t_peak_idx, t_start_boundary, t_end_boundary, t_peak_amplitude, morphology = (
-                        detect_t_wave_ecgpuwave_style(
+                        detect_t_wave_derivative_based(
                             signal=sig_detrended,
                             derivative=derivative,
                             search_start=t_start_idx,
@@ -1079,14 +1119,14 @@ def process_cycle(
                         t_height = t_peak_amplitude
                         
                         if verbose:
-                            print(f"[Cycle {cycle_idx}]: T wave detected via ECGPUWAVE method: "
+                            print(f"[Cycle {cycle_idx}]: T wave detected via derivative-based method: "
                                   f"peak={t_center_idx}, amplitude={t_height:.4f}, "
                                   f"morphology={morphology}")
                     else:
                         # No T wave detected
                         t_center_idx, t_height = None, None
                         if verbose:
-                            print(f"[Cycle {cycle_idx}]: No T wave detected via ECGPUWAVE method")
+                            print(f"[Cycle {cycle_idx}]: No T wave detected via derivative-based method")
                         
         if t_center_idx is None and verbose:
             print(f"[Cycle {cycle_idx}]: T peak rejected — not included in fit.")

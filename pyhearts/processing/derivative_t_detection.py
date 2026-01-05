@@ -1,8 +1,8 @@
 """
-ECGPUWAVE-style T wave detection using derivative-based approach.
+Derivative-based T wave detection.
 
-This module implements T wave detection following ECGPUWAVE's method:
-- Uses low-pass filtered derivative signal (like dbuf)
+This module implements T wave detection using a derivative-based approach:
+- Uses low-pass filtered derivative signal for robust detection
 - Finds T peak as zero-crossing in derivative
 - Uses adaptive threshold for boundary detection (not peak validation)
 """
@@ -18,9 +18,9 @@ def compute_filtered_derivative(
     lowpass_cutoff: float = 40.0,
 ) -> np.ndarray:
     """
-    Compute low-pass filtered derivative signal (ECGPUWAVE's dbuf).
+    Compute low-pass filtered derivative signal.
     
-    ECGPUWAVE applies a low-pass filter (40 Hz) to the signal, then computes
+    Applies a low-pass filter (40 Hz) to the signal, then computes
     the derivative. This creates a smoothed derivative that emphasizes T wave
     transitions while reducing noise.
     
@@ -66,7 +66,7 @@ def detect_zero_crossing(
     max_search: Optional[int] = None,
 ) -> Optional[int]:
     """
-    Detect zero-crossing in signal (ECGPUWAVE's detectar_cero).
+    Detect zero-crossing in signal.
     
     Finds the first zero-crossing from start_idx in the specified direction.
     
@@ -117,9 +117,9 @@ def detect_zero_crossing(
 
 def compute_adaptive_kte(derivative_amplitude: float) -> float:
     """
-    Compute adaptive threshold kte based on derivative amplitude (ECGPUWAVE style).
+    Compute adaptive threshold kte based on derivative amplitude.
     
-    ECGPUWAVE scales kte based on the absolute value of the derivative minimum/maximum:
+    Scales kte based on the absolute value of the derivative minimum/maximum:
     - abs(ymin) >= 0.41: kte = 7
     - abs(ymin) >= 0.35: kte = 6
     - abs(ymin) >= 0.25: kte = 5
@@ -158,7 +158,7 @@ def find_t_wave_boundary(
     back_factor: float = 1.0,
 ) -> Optional[int]:
     """
-    Find T wave boundary using adaptive threshold (ECGPUWAVE's creuar_umbral).
+    Find T wave boundary using adaptive threshold.
     
     Uses adaptive threshold kte to find where derivative crosses threshold,
     which defines the T wave boundary (onset or offset).
@@ -174,7 +174,7 @@ def find_t_wave_boundary(
     direction : {"left", "right"}, default "right"
         Direction to search ("left" for onset, "right" for offset).
     back_factor : float, default 1.0
-        Back-off factor (ECGPUWAVE's back array).
+        Back-off factor for threshold adjustment.
     
     Returns
     -------
@@ -229,7 +229,7 @@ def find_t_wave_boundary(
     return None
 
 
-def detect_t_wave_ecgpuwave_style(
+def detect_t_wave_derivative_based(
     signal: np.ndarray,
     derivative: np.ndarray,
     search_start: int,
@@ -241,9 +241,9 @@ def detect_t_wave_ecgpuwave_style(
     r_peak_value: Optional[float] = None,
 ) -> Tuple[Optional[int], Optional[int], Optional[int], Optional[int], Optional[float]]:
     """
-    Detect T wave using ECGPUWAVE-style derivative-based method.
+    Detect T wave using derivative-based method.
     
-    This function mirrors ECGPUWAVE's `onat` subroutine:
+    Detection strategy:
     1. Finds min/max in derivative signal
     2. Determines T wave morphology
     3. Finds T peak as zero-crossing in derivative
@@ -284,7 +284,7 @@ def detect_t_wave_ecgpuwave_style(
     if len(deriv_seg) < 3:
         return None, None, None, None, 6
     
-    # Find min and max in derivative (ECGPUWAVE's buscamaxmin)
+    # Find min and max in derivative
     imin = search_start + int(np.argmin(deriv_seg))
     imax = search_start + int(np.argmax(deriv_seg))
     ymin = derivative[imin]
@@ -294,7 +294,7 @@ def detect_t_wave_ecgpuwave_style(
         print(f"  Derivative min: {ymin:.4f} at {imin}, max: {ymax:.4f} at {imax}")
     
     # Check if we have valid T wave
-    # ECGPUWAVE allows T waves even if derivative is mostly one-sided
+    # Allow T waves even if derivative is mostly one-sided
     # Only reject if derivative is completely monotonic (no variation)
     # For inverted T waves, we may have mostly negative derivative with small positive
     # For normal T waves, we may have mostly positive derivative with small negative
@@ -433,7 +433,7 @@ def detect_t_wave_ecgpuwave_style(
     t_region_start = min(imin, imax)
     t_region_end = max(imin, imax)
     
-    # Expand region to capture full T wave (ECGPUWAVE uses wider search)
+    # Expand region to capture full T wave
     # The T wave can extend well beyond the derivative min/max region
     # Use a generous expansion, but also ensure we cover most of the search window
     # to catch late T peaks
@@ -471,7 +471,7 @@ def detect_t_wave_ecgpuwave_style(
         t_peak_rel = int(np.argmin(t_region_signal))
         signal_peak_idx = t_region_start + t_peak_rel
     
-    # Secondary method: Find ALL zero-crossings in T wave region (ECGPUWAVE's approach)
+    # Secondary method: Find ALL zero-crossings in T wave region
     # ECGPUWAVE searches for zero-crossings throughout the T wave region, not just near min/max
     # Find all zero-crossings in the T wave region
     all_zero_crossings = []
@@ -486,7 +486,7 @@ def detect_t_wave_ecgpuwave_style(
                 zc_idx = i + 1
             all_zero_crossings.append(zc_idx)
     
-    # Also search from derivative min/max positions (original ECGPUWAVE method)
+    # Also search from derivative min/max positions
     # This helps find zero-crossings that might be just outside t_region
     max_search_distance = int(round(100.0 * sampling_rate / 1000.0))  # Increased to 100ms
     
@@ -525,10 +525,10 @@ def detect_t_wave_ecgpuwave_style(
     icero1 = all_zero_crossings[0] if len(all_zero_crossings) > 0 else None
     icero2 = all_zero_crossings[-1] if len(all_zero_crossings) > 1 else None
     
-    # ECGPUWAVE approach: Find zero-crossing closest to signal apex (wave apex)
-    # ECGPUWAVE detects T peak as zero-crossing in derivative, but selects the
+    # Find zero-crossing closest to signal apex (wave apex)
+    # T peak is detected as zero-crossing in derivative, selecting the
     # zero-crossing that is closest to the signal maximum/minimum (apex)
-    # Analysis shows ECGPUWAVE T peaks are within 1-18 samples of signal apex
+    # T peaks are typically within 1-18 samples of signal apex
     
     # Step 1: Find signal apex (max/min) in T wave region - this is the reference point
     if signal_peak_idx is not None:
@@ -548,8 +548,8 @@ def detect_t_wave_ecgpuwave_style(
         closest_zc = zero_crossings[closest_zc_idx]
         distance_to_apex = distances_to_apex[closest_zc_idx]
         
-        # ECGPUWAVE uses zero-crossing if it's close to apex
-        # Analysis shows ECGPUWAVE T peaks are within 1-18 samples (up to ~72ms at 250Hz)
+        # Use zero-crossing if it's close to apex
+        # T peaks are typically within 1-18 samples (up to ~72ms at 250Hz)
         # Use a reasonable threshold: ~20ms or 5 samples minimum
         max_apex_distance_samples = max(5, int(round(20.0 * sampling_rate / 1000.0)))
         # But also allow up to ~80ms if zero-crossing is the only one found

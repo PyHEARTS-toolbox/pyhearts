@@ -52,20 +52,19 @@ class ProcessCycleConfig:
     pwave_bandpass_high_hz: float = 15.0 # high cutoff frequency (Hz) for P-wave enhancement
     pwave_bandpass_order: int = 4        # filter order for P-wave band-pass
     
-    # ----- Derivative-based detection (full-signal, derivative-based) -----
-    use_derivative_based_detection: bool = False  # use derivative-based peak detection (full-signal filtering, derivative-based)
-
     # ---- Amplitude ratios to avoid noise ---
-    # Lowered P wave minimum ratio from 0.03 to 0.02 to improve detection sensitivity
+    # Increased P wave minimum ratio from 0.02 to 0.03 to reduce false positives (low precision issue)
+    # Typical P waves are 5-15% of R peak amplitude, so 3% minimum is still lenient but filters very small deflections
     amp_min_ratio: Dict[str, float] = field(
-        default_factory=lambda: {"P": 0.02, "T": 0.05, "Q": 0.02, "S": 0.02}  # more sensitive for P waves
+        default_factory=lambda: {"P": 0.03, "T": 0.05, "Q": 0.02, "S": 0.02}  # increased P from 0.02 to 0.03 for precision
     )
     
     # ---- SNR gate (P/T only) ----
-    # Lowered from 2.0→1.5→1.2→1.0 based on QTDB benchmark showing missed P/T waves
-    # Further lowered to 1.0 for P waves to improve detection sensitivity (very lenient)
+    # Increased P wave SNR threshold from 1.0 to 1.5 to reduce false positives (low precision issue)
+    # Many false positives had very low prominence (0.0025-0.0475 mV), indicating baseline noise
+    # Higher threshold (1.5× MAD) will filter out these low-prominence noise artifacts
     snr_mad_multiplier: dict[str, float] = field(
-        default_factory=lambda: {"P": 1.0, "T": 1.5}  # |peak| ≥ k × MAD (very lenient for P waves)
+        default_factory=lambda: {"P": 1.5, "T": 1.5}  # |peak| ≥ k × MAD (increased P from 1.0 to 1.5 for precision)
     )
     snr_exclusion_ms: dict[str, int] = field(
         default_factory=lambda: {"P": 0, "T": 15}     # 0 ⇒ use half-FWHM policy; else ms
@@ -95,7 +94,7 @@ class ProcessCycleConfig:
     #  ---- Search window policy for bounds (physiologic caps by wave) ---- 
     shape_search_scale: float = 2.0
     shape_max_window_ms: Dict[str, int] = field(
-        default_factory=lambda: {"P": 250, "Q": 40, "R": 60, "S": 40, "T": 180}  # Increased P window from 120 to 250ms
+        default_factory=lambda: {"P": 1200, "Q": 40, "R": 60, "S": 40, "T": 180}  # P: 1200ms for full R-R interval search (was 250ms)
     )
 
     # ----- Shape feature thresholds -----

@@ -21,7 +21,6 @@ from pyhearts.processing import (
     process_cycle,
     r_peak_detection,
 )
-from pyhearts.processing.derivative_peak_detection import DerivativeBasedPeakDetector
 
 class PyHEARTS:
     """
@@ -397,7 +396,7 @@ class PyHEARTS:
                 self.output_df = pd.DataFrame()
                 return self.output_df, self.epochs_df
 
-            # Use peak-level validation (ECGPUWave-style) instead of cycle-level filtering
+            # Use peak-level validation instead of cycle-level filtering
             # This processes all detected R-peaks and validates at the peak level
             epochs_df, expected_max_energy = epoch_ecg(
                 ecg_signal,
@@ -408,7 +407,7 @@ class PyHEARTS:
                 corr_thresh=self.cfg.epoch_corr_thresh,
                 var_thresh=self.cfg.epoch_var_thresh,
                 estimate_energy=True,
-                skip_template_filtering=True,  # ECGPUWave-style: validate at peak level
+                skip_template_filtering=True,  # Validate at peak level
             )
 
             self.epochs_df = epochs_df
@@ -417,48 +416,8 @@ class PyHEARTS:
             # Use the actual cycle labels from epochs_df (sorted for determinism)
             cycles = np.sort(epochs_df["cycle"].unique())
             
-            # Derivative-based detection (if enabled)
+            # Precomputed peaks are no longer used (derivative-based detection removed)
             precomputed_peaks = None
-            if self.cfg.use_derivative_based_detection:
-                if self.verbose:
-                    logging.info("Using derivative-based peak detection (full-signal filtering, derivative-based)")
-                detector = DerivativeBasedPeakDetector(self.sampling_rate, self.cfg)
-                precomputed_peaks_by_rpeak = detector.detect_all_peaks(ecg_signal, filtered_r_peaks)
-                if self.verbose:
-                    p_count = sum(1 for v in precomputed_peaks_by_rpeak.values() if v.get('P') is not None)
-                    t_count = sum(1 for v in precomputed_peaks_by_rpeak.values() if v.get('T') is not None)
-                    logging.info(f"Derivative-based detection: {p_count} P-waves, {t_count} T-waves detected")
-                
-                # Map precomputed peaks from R-peak indices to cycle indices
-                # Detector uses R-peak array indices, but cycles may be filtered
-                # Create mapping: cycle_idx -> precomputed peaks based on R-peak location
-                precomputed_peaks = {}
-                if len(cycles) > 0:
-                    for cycle_idx, cycle_label in enumerate(cycles):
-                        one_cycle = epochs_df.loc[epochs_df["cycle"] == cycle_label]
-                        if not one_cycle.empty:
-                            # Get cycle time range from index column (global sample indices)
-                            # signal_x contains relative time values, not sample indices
-                            if "index" in one_cycle.columns:
-                                cycle_indices = one_cycle["index"].values
-                            else:
-                                # Fallback: try to use signal_x if index not available
-                                cycle_indices = one_cycle["signal_x"].values
-                            
-                            if len(cycle_indices) > 0:
-                                cycle_start = int(cycle_indices[0])
-                                cycle_end = int(cycle_indices[-1])
-                                # Find R-peak that falls within this cycle's time range
-                                r_peaks_in_cycle = filtered_r_peaks[
-                                    (filtered_r_peaks >= cycle_start) & (filtered_r_peaks <= cycle_end)
-                                ]
-                                if len(r_peaks_in_cycle) > 0:
-                                    # Use the first R-peak in the cycle
-                                    r_peak_location = r_peaks_in_cycle[0]
-                                    # Find its index in the original R-peak array
-                                    r_peak_idx_in_array = np.where(filtered_r_peaks == r_peak_location)[0]
-                                    if len(r_peak_idx_in_array) > 0 and r_peak_idx_in_array[0] < len(precomputed_peaks_by_rpeak):
-                                        precomputed_peaks[cycle_idx] = precomputed_peaks_by_rpeak[r_peak_idx_in_array[0]]
             
             component_keys = ["P", "Q", "R", "S", "T"]
             peak_feature_keys = [

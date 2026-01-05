@@ -1,7 +1,7 @@
 """
-Adaptive threshold validation for T and P wave detection, mirroring ECGPUWAVE's approach.
+Adaptive threshold validation for T and P wave detection.
 
-ECGPUWAVE uses amplitude-adaptive thresholds that scale based on the detected wave amplitude,
+Uses amplitude-adaptive thresholds that scale based on the detected wave amplitude,
 making it more sensitive to small waves while maintaining specificity for large waves.
 """
 
@@ -18,9 +18,9 @@ def compute_adaptive_threshold_multiplier(
     amplitude_ranges: Optional[list[Tuple[float, float, float]]] = None,
 ) -> float:
     """
-    Compute adaptive threshold multiplier based on wave amplitude (ECGPUWAVE-style).
+    Compute adaptive threshold multiplier based on wave amplitude.
     
-    ECGPUWAVE scales thresholds based on T wave amplitude:
+    Scales thresholds based on T wave amplitude:
     - Large waves (|amp| >= 0.41): threshold × 2.0
     - Medium-large (0.35-0.41): threshold × 1.0 (kte*2 - 1)
     - Medium (0.25-0.35): threshold × 0.0 (kte*2 - 2) 
@@ -32,9 +32,9 @@ def compute_adaptive_threshold_multiplier(
     wave_amplitude : float
         Absolute amplitude of the detected wave (mV).
     base_threshold : float, default 3.5
-        Base threshold value (e.g., kte from ECGPUWAVE).
+        Base threshold value.
     amplitude_ranges : list of (min_amp, max_amp, scale_factor), optional
-        Custom amplitude ranges and scale factors. If None, uses ECGPUWAVE defaults.
+        Custom amplitude ranges and scale factors. If None, uses default ranges.
         Each tuple: (min_amplitude, max_amplitude, scale_factor)
         where scale_factor is applied as: threshold = base_threshold * scale_factor
     
@@ -45,7 +45,7 @@ def compute_adaptive_threshold_multiplier(
     
     Examples
     --------
-    >>> # ECGPUWAVE default behavior for T wave end (kte=3.5)
+    >>> # Default behavior for T wave end (base_threshold=3.5)
     >>> compute_adaptive_threshold_multiplier(0.5, base_threshold=3.5)
     7.0  # Large T wave: 3.5 * 2.0
     >>> compute_adaptive_threshold_multiplier(0.15, base_threshold=3.5)
@@ -55,11 +55,11 @@ def compute_adaptive_threshold_multiplier(
     """
     abs_amp = abs(wave_amplitude)
     
-    # ECGPUWAVE default amplitude ranges for T wave end detection
+    # Default amplitude ranges for T wave end detection
     if amplitude_ranges is None:
         # Format: (min_amp, max_amp, scale_factor)
-        # Scale factors are: kte1 = kte * scale_factor
-        # ECGPUWAVE logic: kte1 = kte*2, kte*2-1, kte*2-2, kte*2-3, or kte
+        # Scale factors applied as: threshold = base_threshold * scale_factor
+        # Logic: threshold = base*2, base*2-1, base*2-2, base*2-3, or base
         amplitude_ranges = [
             (0.41, float('inf'), 2.0),    # Large: kte * 2
             (0.35, 0.41, 1.0),            # Medium-large: kte * 2 - 1 (but we use 1.0 as scale)
@@ -72,7 +72,7 @@ def compute_adaptive_threshold_multiplier(
     for min_amp, max_amp, scale_factor in amplitude_ranges:
         if min_amp <= abs_amp < max_amp:
             # Apply scaling: threshold = base_threshold * scale_factor
-            # But ECGPUWAVE uses additive scaling, so we need to handle that
+            # Uses additive scaling based on amplitude ranges
             if scale_factor == 2.0:
                 # Large: kte * 2
                 return base_threshold * 2.0
@@ -105,7 +105,7 @@ def gate_by_adaptive_threshold(
     verbose: bool = False,
 ) -> list[bool | int | float | None]:
     """
-    Component-aware adaptive threshold gate (ECGPUWAVE-style).
+    Component-aware adaptive threshold gate.
     
     Uses amplitude-adaptive thresholds that scale based on detected wave amplitude.
     This makes the detector more sensitive to small waves while maintaining specificity
@@ -206,7 +206,7 @@ def gate_by_adaptive_threshold(
     return [keep, cand_rel_idx, raw_height]
 
 
-def gate_by_adaptive_threshold_ecgpuwave_style(
+def gate_by_adaptive_threshold(
     seg_raw: np.ndarray,
     sampling_rate: float,
     *,
