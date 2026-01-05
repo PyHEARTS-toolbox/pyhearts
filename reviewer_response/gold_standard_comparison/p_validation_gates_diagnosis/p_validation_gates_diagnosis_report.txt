@@ -1,0 +1,50 @@
+================================================================================
+P Peak Validation Gates Diagnosis
+================================================================================
+
+Total missed peaks analyzed: 12
+
+1. VALIDATION GATE FAILURE ANALYSIS
+--------------------------------------------------------------------------------
+temporal_pr_distance:
+  Passed: 12/12 (100.0%)
+  Failed: 0/12 (0.0%)
+
+temporal_pq_distance:
+  Passed: 12/12 (100.0%)
+  Failed: 0/12 (0.0%)
+
+amplitude_ratio:
+  Passed: 11/12 (91.7%)
+  Failed: 1/12 (8.3%)
+  Rejection reasons:
+    - P/R ratio 0.0241 < 0.03
+
+snr_gate:
+  Passed: 12/12 (100.0%)
+  Failed: 0/12 (0.0%)
+
+training_threshold:
+  Passed: 12/12 (100.0%)
+  Failed: 0/12 (0.0%)
+
+morphology_validation:
+  Passed: 11/12 (91.7%)
+  Failed: 1/12 (8.3%)
+  Rejection reasons:
+    - Failed morphology validation (likely Q peak)
+
+2. OVERALL ANALYSIS
+--------------------------------------------------------------------------------
+Peaks that would pass ALL gates: 11/12 (91.7%)
+
+Failed gates frequency:
+  amplitude_ratio: 1/12 (8.3%)
+  morphology_validation: 1/12 (8.3%)
+
+3. KEY FINDINGS
+--------------------------------------------------------------------------------
+Most common validation gate failure: amplitude_ratio (1/12 peaks, 8.3%)
+
+Peaks failing multiple gates: 1/12 (8.3%)
+

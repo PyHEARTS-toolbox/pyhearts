@@ -54,6 +54,7 @@ class ProcessCycleConfig:
     
     # ----- Experimental P-peak detection improvements (for testing) -----
     p_use_training_phase: bool = False   # Enable training-phase adaptive thresholds
+    p_use_training_as_primary: bool = False  # Use training thresholds as PRIMARY validation (vs secondary check)
     p_safety_margin_ms: float = 60.0     # Safety margin before Q/R peak (adjustable, default 60ms)
     
     # ---- Amplitude ratios to avoid noise ---

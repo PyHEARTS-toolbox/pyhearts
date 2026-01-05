@@ -1,0 +1,29 @@
+Peak Detection Re-assessment: PyHEARTS vs ECGpuwave
+================================================================================
+
+This analysis compares PyHEARTS and ECGpuwave peak detection
+with different outlier removal thresholds.
+
+================================================================================
+RECOMMENDED COMPARISON (Outlier Threshold: 100ms)
+================================================================================
+
+peak    n  mean_error_ms  median_error_ms  within_20ms_pct  within_50ms_pct  outliers_removed  outliers_removed_pct
+   P 3796      30.464700             20.0        51.317176        73.155954                 0                   0.0
+   T 4524      26.904509             16.0        58.687003        82.515473                 0                   0.0
+
+================================================================================
+DETAILED RESULTS BY THRESHOLD
+================================================================================
+
+peak  outlier_method    n  mean_error_ms  median_error_ms  std_error_ms  p95_error_ms  within_20ms_pct  within_50ms_pct  outliers_removed  outliers_removed_pct
+   P             all 3796      30.464700             20.0     29.129685          88.0        51.317176        73.155954                 0              0.000000
+   P threshold_200ms 3796      30.464700             20.0     29.129685          88.0        51.317176        73.155954                 0              0.000000
+   P threshold_150ms 3796      30.464700             20.0     29.129685          88.0        51.317176        73.155954                 0              0.000000
+   P threshold_100ms 3796      30.464700             20.0     29.129685          88.0        51.317176        73.155954                 0              0.000000
+   P  threshold_80ms 3489      25.023789             12.0     23.543810          68.0        55.832617        79.593007               307              8.087460
+   T             all 4524      26.904509             16.0     30.043392          96.0        58.687003        82.515473                 0              0.000000
+   T threshold_200ms 4524      26.904509             16.0     30.043392          96.0        58.687003        82.515473                 0              0.000000
+   T threshold_150ms 4524      26.904509             16.0     30.043392          96.0        58.687003        82.515473                 0              0.000000
+   T threshold_100ms 4524      26.904509             16.0     30.043392          96.0        58.687003        82.515473                 0              0.000000
+   T  threshold_80ms 3980      17.656281             12.0     17.661657          56.0        66.708543        93.793970               544             12.024757

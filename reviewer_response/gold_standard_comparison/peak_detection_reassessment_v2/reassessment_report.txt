@@ -1,0 +1,10 @@
+Peak Detection Re-assessment: PyHEARTS vs ECGpuwave
+================================================================================
+
+NOTE: This analysis uses summary statistics from comparison files.
+For detailed per-beat outlier removal, per-beat comparison data
+would need to be generated from raw PyHEARTS and ECGpuwave results.
+
+Current Summary (All Data, No Outlier Removal):
+--------------------------------------------------------------------------------
+

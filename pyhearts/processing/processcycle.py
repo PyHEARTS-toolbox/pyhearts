@@ -96,6 +96,8 @@ def process_cycle(
     precomputed_peaks: dict | None = None,
     original_r_peaks: np.ndarray | None = None,
     full_derivative: np.ndarray | None = None,
+    p_training_signal_peak: float | None = None,
+    p_training_noise_peak: float | None = None,
 ):
 
     cfg = cfg or ProcessCycleConfig()  # safe default
@@ -503,12 +505,23 @@ def process_cycle(
 
         # --- Q Peak ---
         # Ensure Q search is before R (fix temporal order violations)
+        # Also ensure search window is wide enough (Q waves can be up to 100-150ms before R)
         if q_start is not None and r_center_idx is not None:
             if q_start >= r_center_idx:
                 # q_start is after R, which is invalid - search before R instead
                 q_start = max(0, r_center_idx - int(round(0.1 * sampling_rate)))  # 100ms before R
                 if verbose:
                     print(f"[Cycle {cycle_idx}]: Adjusted q_start from invalid position to {q_start} (before R at {r_center_idx})")
+            else:
+                # Ensure search window is wide enough to capture Q waves up to 150ms before R
+                # The wavelet-based q_start may be too close to R (only 20-60ms), missing earlier Q waves
+                min_q_search_ms = 150.0  # Minimum search window: 150ms before R
+                q_start_min = max(0, r_center_idx - int(round(min_q_search_ms * sampling_rate / 1000.0)))
+                if q_start > q_start_min:
+                    # Current q_start is too close to R (larger index), expand the search window (use smaller index)
+                    q_start = q_start_min
+                    if verbose:
+                        print(f"[Cycle {cycle_idx}]: Expanded Q search window to {q_start} (150ms before R at {r_center_idx})")
         
         q_center_idx, q_height, _ = find_peaks(
             sig_detrended,
@@ -667,15 +680,13 @@ def process_cycle(
                         print(f"[Cycle {cycle_idx}]: P window too small (start={start_idx}, end={pre_qrs_len}).")
                     p_center_idx, p_height = None, None
                 else:
-                    # Apply band-pass filter for P-wave detection
-                    # This enhances P-wave visibility while preserving morphology
-                    # Step 3: Add fallback to unfiltered signal if band-pass fails
-                    p_center_idx, p_height = None, None
-                
-                if cfg.pwave_use_bandpass:
-                    # Filter a larger segment to avoid edge artifacts, then extract the original window
-                    # Edge artifacts occur when filtering short segments, so we pad the segment
-                    filter_padding_ms = 50  # Extra samples on each side to avoid edge artifacts
+                    # Try band-pass filtered signal first (if enabled), then fallback to unfiltered
+                    sig_for_p_detection = sig_detrended
+                    
+                    if cfg.pwave_use_bandpass:
+                        # Filter a larger segment to avoid edge artifacts, then extract the original window
+                        # Edge artifacts occur when filtering short segments, so we pad the segment
+                        filter_padding_ms = 50  # Extra samples on each side to avoid edge artifacts
                     filter_padding_samples = int(round(filter_padding_ms * sampling_rate / 1000.0))
                     filter_start = max(0, start_idx - filter_padding_samples)
                     filter_end = min(len(sig_detrended), pre_qrs_len + filter_padding_samples)
@@ -786,63 +797,38 @@ def process_cycle(
                         elif p_center_idx_neg is not None:
                             p_center_idx, p_height = p_center_idx_neg, p_height_neg
                         
-                        # If found, check SNR gate
-                        # Step 5: Determine polarity from detected P-wave
+                        # Refine peak position in unfiltered signal to avoid filter phase shifts
                         if p_center_idx is not None:
-                            # Store original detected position BEFORE SNR gate (for accurate timing)
-                            p_center_idx_detected = p_center_idx
-                            
-                            seg = sig_detrended[start_idx:pre_qrs_len]
-                            # Determine expected polarity from detected P-wave
-                            p_detected_value = seg[p_center_idx - start_idx] if (p_center_idx - start_idx) < len(seg) else seg[0]
-                            expected_polarity = "positive" if p_detected_value >= 0 else "negative"
-                            
-                            keep, rel_idx, p_h = gate_by_local_mad(
-                                seg, sampling_rate,
-                                comp="P",
-                                cand_rel_idx=p_center_idx - start_idx,
-                                expected_polarity=expected_polarity,  # Use detected polarity
-                                cfg=cfg,
-                                baseline_mode="rolling",
-                            )
-                            if keep:
-                                # Use original detected position for timing (SNR gate only validates, doesn't refine position for P)
-                                p_center_idx = p_center_idx_detected
-                                p_height = p_h
-                                
-                                # Refine peak position in unfiltered signal to avoid filter phase shifts
-                                # Use larger window and derivative-based detection for better accuracy
-                                refine_window_samples = int(round(40 * sampling_rate / 1000.0))  # ±40ms window for better phase shift correction
-                                refine_start = max(0, p_center_idx - refine_window_samples)
-                                refine_end = min(len(sig_detrended), p_center_idx + refine_window_samples + 1)
-                                if refine_end > refine_start:
-                                    # Use derivative-based peak finding in unfiltered signal (more accurate)
-                                    p_center_idx_refined, p_height_refined = find_peak_derivative_based(
-                                        sig_detrended, refine_start, refine_end, expected_polarity, verbose, "P", cycle_idx
-                                    )
-                                    if p_center_idx_refined is not None:
-                                        # Apply parabolic interpolation for sub-sample accuracy
-                                        refined_subsample = refine_peak_parabolic(sig_detrended, p_center_idx_refined)
-                                        p_center_idx_refined = int(np.round(refined_subsample))
-                                        p_center_idx_refined = np.clip(p_center_idx_refined, 0, len(sig_detrended) - 1)
-                                        p_height_refined = sig_detrended[p_center_idx_refined]
-                                        
-                                        if verbose and abs(p_center_idx_refined - p_center_idx) > 2:
-                                            print(f"[Cycle {cycle_idx}]: P peak refined from filtered position {p_center_idx} to unfiltered position {p_center_idx_refined} (offset: {p_center_idx_refined - p_center_idx} samples)")
-                                        p_center_idx = p_center_idx_refined
-                                        p_height = p_height_refined
-                                    # If derivative method fails, fallback to simple argmax/argmin
-                                    elif refine_end - refine_start >= 3:
-                                        refine_seg = sig_detrended[refine_start:refine_end]
-                                        if expected_polarity == "positive":
-                                            refine_local_idx = int(np.argmax(refine_seg))
-                                        else:
-                                            refine_local_idx = int(np.argmin(refine_seg))
-                                        p_center_idx_refined = refine_start + refine_local_idx
-                                        p_center_idx = p_center_idx_refined
-                                        p_height = sig_detrended[p_center_idx]
-                            else:
-                                p_center_idx, p_height = None, None
+                            # Use larger window and derivative-based detection for better accuracy
+                            refine_window_samples = int(round(40 * sampling_rate / 1000.0))  # ±40ms window for better phase shift correction
+                            refine_start = max(0, p_center_idx - refine_window_samples)
+                            refine_end = min(len(sig_detrended), p_center_idx + refine_window_samples + 1)
+                            if refine_end > refine_start:
+                                # Use derivative-based peak finding in unfiltered signal (more accurate)
+                                p_center_idx_refined, p_height_refined = find_peak_derivative_based(
+                                    sig_detrended, refine_start, refine_end, expected_polarity, verbose, "P", cycle_idx
+                                )
+                                if p_center_idx_refined is not None:
+                                    # Apply parabolic interpolation for sub-sample accuracy
+                                    refined_subsample = refine_peak_parabolic(sig_detrended, p_center_idx_refined)
+                                    p_center_idx_refined = int(np.round(refined_subsample))
+                                    p_center_idx_refined = np.clip(p_center_idx_refined, 0, len(sig_detrended) - 1)
+                                    p_height_refined = sig_detrended[p_center_idx_refined]
+                                    
+                                    if verbose and abs(p_center_idx_refined - p_center_idx) > 2:
+                                        print(f"[Cycle {cycle_idx}]: P peak refined from filtered position {p_center_idx} to unfiltered position {p_center_idx_refined} (offset: {p_center_idx_refined - p_center_idx} samples)")
+                                    p_center_idx = p_center_idx_refined
+                                    p_height = p_height_refined
+                                # If derivative method fails, fallback to simple argmax/argmin
+                                elif refine_end - refine_start >= 3:
+                                    refine_seg = sig_detrended[refine_start:refine_end]
+                                    if expected_polarity == "positive":
+                                        refine_local_idx = int(np.argmax(refine_seg))
+                                    else:
+                                        refine_local_idx = int(np.argmin(refine_seg))
+                                    p_center_idx_refined = refine_start + refine_local_idx
+                                    p_center_idx = p_center_idx_refined
+                                    p_height = sig_detrended[p_center_idx]
                 
                 # Fallback: if band-pass failed or not enabled, try unfiltered signal
                 if p_center_idx is None:
@@ -916,14 +902,52 @@ def process_cycle(
                         p_detected_value = seg[p_center_idx - start_idx] if (p_center_idx - start_idx) < len(seg) else seg[0]
                         expected_polarity = "positive" if p_detected_value >= 0 else "negative"
                         
-                        keep, rel_idx, p_h = gate_by_local_mad(
-                            seg, sampling_rate,
-                            comp="P",
-                            cand_rel_idx=p_center_idx - start_idx,
-                            expected_polarity=expected_polarity,  # Use detected polarity
-                            cfg=cfg,
-                            baseline_mode="rolling",
-                        )
+                        # Get peak height from segment
+                        p_rel_idx = p_center_idx - start_idx
+                        if 0 <= p_rel_idx < len(seg):
+                            p_h = seg[p_rel_idx]
+                        else:
+                            p_h = seg[0] if len(seg) > 0 else 0.0
+                        
+                        # Validation: use training thresholds as PRIMARY if configured, else as SECONDARY
+                        keep = True
+                        if cfg is not None and cfg.p_use_training_as_primary and p_training_noise_peak is not None:
+                            # PRIMARY validation: Training thresholds (ECGPUWAVE-style)
+                            if abs(p_h) < p_training_noise_peak:
+                                if verbose:
+                                    print(f"[Cycle {cycle_idx}]: P wave rejected by training phase (PRIMARY, unfiltered): |p_height|={abs(p_h):.4f} < noise_peak={p_training_noise_peak:.4f}")
+                                keep = False
+                            else:
+                                # SECONDARY validation: Local MAD (optional, if training passed)
+                                if keep:
+                                    keep, _, p_h_mad = gate_by_local_mad(
+                                        seg, sampling_rate,
+                                        comp="P",
+                                        cand_rel_idx=p_rel_idx,
+                                        expected_polarity=expected_polarity,
+                                        cfg=cfg,
+                                        baseline_mode="rolling",
+                                    )
+                                    if p_h_mad is not None:
+                                        p_h = p_h_mad
+                        else:
+                            # PRIMARY validation: Local MAD (current default)
+                            keep, rel_idx, p_h = gate_by_local_mad(
+                                seg, sampling_rate,
+                                comp="P",
+                                cand_rel_idx=p_rel_idx,
+                                expected_polarity=expected_polarity,
+                                cfg=cfg,
+                                baseline_mode="rolling",
+                            )
+                            
+                            # SECONDARY validation: Training thresholds (if available)
+                            if keep and p_training_noise_peak is not None and p_h is not None:
+                                if abs(p_h) < p_training_noise_peak:
+                                    if verbose:
+                                        print(f"[Cycle {cycle_idx}]: P wave rejected by training phase (SECONDARY, unfiltered): |p_height|={abs(p_h):.4f} < noise_peak={p_training_noise_peak:.4f}")
+                                    keep = False
+                        
                         if keep:
                             # Use original detected position for timing (SNR gate only validates, doesn't refine position for P)
                             p_center_idx = p_center_idx_detected

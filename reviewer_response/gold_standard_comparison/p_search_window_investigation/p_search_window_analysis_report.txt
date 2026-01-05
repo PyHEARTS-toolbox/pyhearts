@@ -1,0 +1,40 @@
+================================================================================
+P Search Window Boundary Investigation
+================================================================================
+
+Total missed peaks analyzed: 12
+
+1. SEARCH WINDOW COVERAGE
+--------------------------------------------------------------------------------
+Manual P peaks within PyHEARTS search window: 12/12 (100.0%)
+Manual P peaks OUTSIDE PyHEARTS search window: 0/12 (0.0%)
+
+2. SEARCH WINDOW CHARACTERISTICS
+--------------------------------------------------------------------------------
+Search window width (mean): 1070.3 ms
+Search window width (median): 1200.0 ms
+Search window width (range): 488.0 - 1200.0 ms
+
+Search start method:
+  max_window: 12/12 (100.0%)
+
+Q detected (affects search window end): 9/12 (75.0%)
+
+3. PR INTERVALS
+--------------------------------------------------------------------------------
+PR interval (mean): 173.7 ms
+PR interval (median): 172.0 ms
+PR interval (range): 140.0 - 220.0 ms
+
+4. KEY FINDINGS
+--------------------------------------------------------------------------------
+✓ All peaks are WITHIN PyHEARTS search window
+  → Search window is not the issue
+  → Problem is in the DETECTION ALGORITHM (derivative-based detection)
+
+5. RECOMMENDATIONS
+--------------------------------------------------------------------------------
+1. Investigate detection algorithm (derivative-based detection)
+2. Check if band-pass filtering affects peak detection
+3. Compare PyHEARTS vs ECGpuwave detection algorithms
+4. Analyze why peaks are not found even though they're in the window

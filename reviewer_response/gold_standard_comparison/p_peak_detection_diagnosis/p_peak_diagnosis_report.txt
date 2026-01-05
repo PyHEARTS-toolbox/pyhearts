@@ -1,0 +1,28 @@
+P Peak Detection Diagnosis: PyHEARTS vs ECGpuwave
+================================================================================
+
+PERFORMANCE COMPARISON:
+--------------------------------------------------------------------------------
+PyHEARTS: 28.32 ms mean error, 56.92 ms std, 51.6% within ±20ms
+ECGpuwave: -3.23 ms mean error, 8.42 ms std, 98.0% within ±20ms
+Difference: +31.55 ms (8.8x worse)
+
+KEY FINDINGS:
+--------------------------------------------------------------------------------
+1. PyHEARTS is 8.8x less accurate than ECGpuwave
+2. PyHEARTS has 6.8x more error variability
+3. PyHEARTS: 51.6% within ±20ms vs ECGpuwave: 98.0% (46.5 percentage point gap)
+4. ECGpuwave detected 480 more P peaks (19.2% more) - PyHEARTS may be missing P peaks
+5. Systematic bias: PyHEARTS +28.32 ms, ECGpuwave -3.23 ms
+
+POTENTIAL CAUSES:
+--------------------------------------------------------------------------------
+1. Missing P peaks (detection rate lower than ECGpuwave)
+2. Higher error variability (std error is much higher)
+3. Algorithm differences:
+   - PyHEARTS: Band-pass filtering + derivative-based + SNR gating
+   - ECGpuwave: Training-phase adaptive thresholds
+4. Recent improvements not yet reflected:
+   - P training phase implementation (recent)
+   - Q detection improvements (helps P detection)
+   - Need to verify if these improvements are in the comparison data

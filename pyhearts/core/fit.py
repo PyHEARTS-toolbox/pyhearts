@@ -247,7 +247,7 @@ class PyHEARTS:
             pairwise_differences=pairwise_differences,
         )
 
-    def process_cycle_wrapper(self, one_cycle: pd.DataFrame, cycle_idx: int, precomputed_peaks: dict | None = None, full_derivative: np.ndarray | None = None):
+    def process_cycle_wrapper(self, one_cycle: pd.DataFrame, cycle_idx: int, precomputed_peaks: dict | None = None, full_derivative: np.ndarray | None = None, p_training_signal_peak: float | None = None, p_training_noise_peak: float | None = None):
         """
         Process and extract features from a single ECG cycle.
     
@@ -260,6 +260,14 @@ class PyHEARTS:
             DataFrame containing the time-series samples for one ECG cycle.
         cycle_idx : int
             Index of the cycle within the overall ECG signal.
+        precomputed_peaks : dict, optional
+            Precomputed peak annotations (not currently used).
+        full_derivative : np.ndarray, optional
+            Full-signal derivative for T-peak detection.
+        p_training_signal_peak : float, optional
+            P wave training phase signal peak threshold (ECGPUWAVE-style).
+        p_training_noise_peak : float, optional
+            P wave training phase noise peak threshold (ECGPUWAVE-style).
     
         Returns
         -------
@@ -288,6 +296,8 @@ class PyHEARTS:
             precomputed_peaks=precomputed_peaks,
             original_r_peaks=self.r_peak_indices if hasattr(self, 'r_peak_indices') else None,
             full_derivative=full_derivative,
+            p_training_signal_peak=p_training_signal_peak,
+            p_training_noise_peak=p_training_noise_peak,
         )
 
 
@@ -428,6 +438,41 @@ class PyHEARTS:
             # Precomputed peaks are no longer used (derivative-based detection removed)
             precomputed_peaks = None
             
+            # Compute P wave training phase thresholds (ECGPUWAVE-style)
+            # Analyzes first 1-3 seconds to learn P wave signal vs noise characteristics
+            p_training_signal_peak = None
+            p_training_noise_peak = None
+            if len(cycles) > 0:
+                from pyhearts.processing.p_training_phase import compute_p_training_phase_thresholds
+                # Build full detrended signal for training phase (cycles are already detrended)
+                max_idx = epochs_df["index"].max()
+                full_signal_for_training = np.zeros(int(max_idx) + 1)
+                for cycle_label in cycles[:min(10, len(cycles))]:  # Use first 10 cycles for training
+                    cycle_data = epochs_df.loc[epochs_df["cycle"] == cycle_label].sort_values('index')
+                    cycle_indices = cycle_data["index"].values.astype(int)
+                    cycle_signal = cycle_data["signal_y"].values
+                    cycle_start = int(cycle_indices[0])
+                    cycle_end = int(cycle_indices[-1])
+                    full_signal_for_training[cycle_start:cycle_end+1] = cycle_signal
+                
+                try:
+                    p_training_signal_peak, p_training_noise_peak = compute_p_training_phase_thresholds(
+                        full_signal_for_training,
+                        self.sampling_rate,
+                        training_start_sec=1.0,
+                        training_end_sec=3.0,
+                        bandpass_low_hz=self.cfg.pwave_bandpass_low_hz,
+                        bandpass_high_hz=self.cfg.pwave_bandpass_high_hz,
+                        bandpass_order=self.cfg.pwave_bandpass_order,
+                    )
+                    if self.verbose:
+                        logging.info(f"P training phase: signal_peak={p_training_signal_peak:.4f} mV, noise_peak={p_training_noise_peak:.4f} mV")
+                except Exception as e:
+                    if self.verbose:
+                        logging.warning(f"P training phase failed: {e}, using defaults")
+                    p_training_signal_peak = None
+                    p_training_noise_peak = None
+            
             # Compute full-signal derivative for T-peak detection (reduces edge artifacts)
             # Build full detrended signal from cycles (cycles are already detrended in epoch.py)
             full_derivative = None
@@ -531,7 +576,13 @@ class PyHEARTS:
             for cycle_idx, cycle_label in enumerate(cycles):
                 one_cycle = epochs_df.loc[epochs_df["cycle"] == cycle_label]
                 try:
-                    self.process_cycle_wrapper(one_cycle, cycle_idx, precomputed_peaks=precomputed_peaks, full_derivative=full_derivative)
+                    self.process_cycle_wrapper(
+                        one_cycle, cycle_idx, 
+                        precomputed_peaks=precomputed_peaks, 
+                        full_derivative=full_derivative,
+                        p_training_signal_peak=p_training_signal_peak,
+                        p_training_noise_peak=p_training_noise_peak,
+                    )
                 except Exception as e:
                     logging.error(f"Error processing cycle {cycle_idx}: {e}")
                     continue

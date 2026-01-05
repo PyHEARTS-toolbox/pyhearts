@@ -1,0 +1,36 @@
+================================================================================
+Comprehensive P Detection Issue Diagnosis
+================================================================================
+
+1. DETECTION RATE ANALYSIS
+--------------------------------------------------------------------------------
+Total beats analyzed: 275
+PyHEARTS P detected: 264 (96.0%)
+ECGpuwave P detected: 0 (0.0%)
+Difference: -264 beats (-96.0 percentage points)
+
+2. ERROR ANALYSIS (Detected Peaks Only)
+--------------------------------------------------------------------------------
+PyHEARTS:
+  Mean error: 93.52 ms
+  Median error: 20.00 ms
+  Std error: 663.13 ms
+  % within ±20ms: 53.8%
+  % within ±50ms: 68.2%
+
+3. SIGNAL CHARACTERISTICS ANALYSIS
+--------------------------------------------------------------------------------
+PyHEARTS - Missed vs Detected Peaks:
+  P amplitude (missed): 3.5645 mV (mean), 4.9300 mV (median)
+  P amplitude (detected): -0.0816 mV (mean), 0.0000 mV (median)
+  SNR (missed): 130.44 (mean), 122.02 (median)
+  SNR (detected): 3.63 (mean), 1.65 (median)
+  PR interval (missed): 176.4 ms (mean), 176.0 ms (median)
+  PR interval (detected): 232.7 ms (mean), 176.0 ms (median)
+
+4. BIAS ANALYSIS
+--------------------------------------------------------------------------------
+PyHEARTS mean bias: 93.52 ms (LATE detection)
+
+5. KEY FINDINGS
+--------------------------------------------------------------------------------

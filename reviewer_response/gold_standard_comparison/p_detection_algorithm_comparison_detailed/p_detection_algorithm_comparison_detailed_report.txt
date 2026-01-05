@@ -1,0 +1,29 @@
+================================================================================
+P Detection Algorithm Comparison (Detailed)
+================================================================================
+
+Total missed peaks analyzed: 12
+
+1. PEAK DETECTABILITY ANALYSIS
+--------------------------------------------------------------------------------
+P peak is local extrema in raw signal: 6/12 (50.0%)
+P peak is max/min in search window (raw): 0/12 (0.0%)
+P peak is max/min in search window (detrended): 0/12 (0.0%)
+P peak is max/min in search window (filtered): 0/12 (0.0%)
+
+2. DERIVATIVE-BASED DETECTION
+--------------------------------------------------------------------------------
+Derivative-based detection found peak (raw): 3/12 (25.0%)
+Derivative-based detection found peak (detrended): 0/12 (0.0%)
+
+3. KEY FINDINGS
+--------------------------------------------------------------------------------
+⚠ 6 peaks are NOT local extrema
+⚠ Derivative-based detection misses 12 peaks
+  → Detection algorithm has issues with these peak morphologies
+
+4. RECOMMENDATIONS
+--------------------------------------------------------------------------------
+1. Investigate why derivative-based detection misses some peaks
+2. Analyze peak morphologies that are missed
+3. Consider alternative detection methods for these cases

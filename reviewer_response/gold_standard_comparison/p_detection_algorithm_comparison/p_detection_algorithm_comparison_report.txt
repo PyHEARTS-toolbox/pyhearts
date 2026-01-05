@@ -1,0 +1,69 @@
+================================================================================
+P Detection Algorithm Comparison: PyHEARTS vs ECGpuwave
+================================================================================
+
+Focus: Understanding 19.2% lower detection rate in PyHEARTS
+
+Total beats analyzed: 368
+
+1. DETECTION RATE COMPARISON
+--------------------------------------------------------------------------------
+PyHEARTS P detected: 356 (96.7%)
+ECGpuwave P detected: 335 (91.0%)
+Difference: -21 beats (-5.7 percentage points)
+
+2. DETECTION PATTERNS
+--------------------------------------------------------------------------------
+both_detected: 323 (87.8%)
+pyhearts_only: 33 (9.0%)
+ecgpuwave_only: 12 (3.3%)
+
+3. PEAKS MISSED BY PYHEARTS (but detected by ECGpuwave)
+--------------------------------------------------------------------------------
+Count: 12 beats
+
+Signal Characteristics (Missed by PyHEARTS):
+  P amplitude (abs): 3.3192 mV (mean), 4.9175 mV (median)
+  P amplitude range: 0.0150 - 4.9750 mV
+  P/R ratio: 0.5571 (mean), 0.7986 (median)
+  P/R ratio range: 0.0103 - 0.8491
+  SNR: 120.02 (mean), 105.35 (median)
+  SNR range: 0.56 - 333.87
+  PR interval: 176.7 ms (mean), 178.0 ms (median)
+  PR interval range: 156.0 - 192.0 ms
+
+4. COMPARISON: Missed vs Detected by PyHEARTS
+--------------------------------------------------------------------------------
+P Amplitude:
+  Missed: 4.9175 mV (median)
+  Detected: 0.0900 mV (median)
+  Ratio (missed/detected): 54.64x
+
+SNR:
+  Missed: 105.35 (median)
+  Detected: 1.56 (median)
+  Ratio (missed/detected): 67.63x
+
+P/R Ratio:
+  Missed: 0.7986 (median)
+  Detected: 0.0707 (median)
+  Ratio (missed/detected): 11.29x
+
+5. KEY FINDINGS
+--------------------------------------------------------------------------------
+✓ PyHEARTS missed 12 peaks that ECGpuwave detected
+  (3.3% of total beats)
+
+⚠ Missed peaks have HIGHER amplitude (unexpected!)
+  → Suggests non-amplitude-based rejection (morphology, timing, etc.)
+
+⚠ Missed peaks have HIGHER SNR (unexpected!)
+  → Suggests non-SNR-based rejection
+
+6. RECOMMENDATIONS
+--------------------------------------------------------------------------------
+1. Analyze which validation gates are rejecting missed peaks
+2. Compare threshold values: PyHEARTS vs ECGpuwave
+3. Test if relaxing thresholds improves detection rate
+4. Investigate if search window limitations are causing misses
+5. Check if Q detection failures are affecting P detection
