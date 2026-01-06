@@ -198,6 +198,7 @@ dev/
 
 # External tools and binaries
 ecgpuwave-*/
+qtdb_full_ecgpuwave_results/
 
 # Development/utility scripts (not part of the toolbox)
 process_qtdb_full.py

@@ -1334,6 +1334,12 @@ def process_cycle(
             # Perform curve fitting
             p0 = valid_guess.flatten()
             
+            # Clamp guess within bounds to avoid "x0 is infeasible" error
+            # This ensures the initial guess is within bounds, especially important for
+            # std values where float std_guess can exceed truncated int bounds
+            epsilon = 1e-8  # small number to avoid edge
+            p0 = np.clip(p0, bounds[0] + epsilon, bounds[1] - epsilon)
+            
             if verbose:
                 print(f"[Cycle {cycle_idx}]: Preparing to run curve_fit...")
             try:
