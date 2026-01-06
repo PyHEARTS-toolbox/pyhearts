@@ -258,6 +258,8 @@ in_depth_*.py
 
 # Processing module development files (non-toolbox - experimental/alternative implementations)
 pyhearts/processing/p_wave_detection_*.py
+# Exception: p_wave_detection_improved.py is used in production code
+!pyhearts/processing/p_wave_detection_improved.py
 pyhearts/processing/qrs_boundary_detection.py
 
 # Verification/utility scripts
