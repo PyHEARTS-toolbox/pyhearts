@@ -196,6 +196,9 @@ pyhearts.egg-info/
 # Development and non-essential files (benchmarks, analysis, external tools)
 dev/
 
+# Analysis folder (contains all non-toolbox analysis scripts, results, and documentation)
+analysis/
+
 # External tools and binaries
 ecgpuwave-*/
 qtdb_full_ecgpuwave_results/

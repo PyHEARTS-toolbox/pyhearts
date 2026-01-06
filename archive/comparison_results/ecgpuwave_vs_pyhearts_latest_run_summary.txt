@@ -1,0 +1,18 @@
+================================================================================
+PyHEARTS vs ECGPUWAVE (QTDB) - Peak and QRS Boundary Comparison
+================================================================================
+Subjects analyzed: 1
+
+R peak:
+  Per-subject MAE (ms): mean=8.83, std=nan
+  Total matches: 48
+P peak:
+  Per-subject MAE (ms): mean=4.67, std=nan
+  Total matches: 12
+T peak: no matches
+QRS onset (Q on):
+  Per-subject MAE (ms): mean=122.18, std=nan
+  Total matches: 44
+QRS end (Q off):
+  Per-subject MAE (ms): mean=151.92, std=nan
+  Total matches: 48

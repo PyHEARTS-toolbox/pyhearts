@@ -1,8 +1,0 @@
-P Peak Detection After Q Improvement
-================================================================================
-
-Total beats: 275
-Q detection rate: 37.1%
-Overall mean error: 93.52 ms
-With Q detected: 48.04 ms
-Without Q detected: 118.25 ms

@@ -1,0 +1,3 @@
+subject,sampling_rate,pyhearts_p_count,ecgpuwave_p_count,ecgpuwave_precision,ecgpuwave_recall,ecgpuwave_f1,ecgpuwave_mean_timing_error_ms,ecgpuwave_max_timing_error_ms,ecgpuwave_within_15ms_pct,ecgpuwave_tp,ecgpuwave_fp,ecgpuwave_fn,qtdb_p_count,qtdb_precision,qtdb_recall,qtdb_f1,qtdb_mean_timing_error_ms,qtdb_max_timing_error_ms,qtdb_within_15ms_pct,qtdb_tp,qtdb_fp,qtdb_fn
+sel117,250,33,765,33.33333333333333,1.4379084967320261,2.7568922305764407,4.0,8.0,100.0,11,22,754,30,0.0,0.0,0.0,,,0.0,0,33,30
+sel123,250,221,753,41.6289592760181,12.217795484727755,18.891170431211503,4.608695652173913,12.0,100.0,92,129,661,30,0.904977375565611,6.666666666666667,1.5936254980079685,6.0,8.0,100.0,2,219,28

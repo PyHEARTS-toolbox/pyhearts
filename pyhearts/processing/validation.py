@@ -289,11 +289,11 @@ def log_peak_result(
         p_r_distance_samples = r_center_idx - center_idx
         p_r_distance_ms = (p_r_distance_samples / sampling_rate) * 1000.0
         
-        # P waves should be at least 120ms before R peak (to avoid QRS complex and Q peaks)
-        # Typical P-R intervals are 120-200ms. If P is too close to R (< 120ms), 
-        # it's likely a Q peak or QRS artifact, not a P wave.
-        # Increased from 80ms to 120ms to reduce false positives (low precision issue)
-        min_p_r_distance_ms = 120.0
+        # P waves should be at least 100ms before R peak (to avoid QRS complex and Q peaks)
+        # Typical P-R intervals are 120-200ms, but can be as short as 100-120ms in some cases.
+        # ECGPUWAVE shows P-R intervals as low as 124ms, so we use 100ms to avoid rejecting valid P waves.
+        # If P is too close to R (< 100ms), it's likely a Q peak or QRS artifact, not a P wave.
+        min_p_r_distance_ms = 100.0
         if p_r_distance_ms < min_p_r_distance_ms:
             if verbose:
                 print(f"[Cycle {cycle_idx}]: P wave rejected - too close to R peak "
@@ -385,6 +385,21 @@ def log_peak_result(
                         print(
                             f"[Cycle {cycle_idx}]: {comp} too small "
                             f"({abs(float(height)):.3f} < {t_threshold:.3f})."
+                        )
+                    return None, None
+            elif comp == "P":
+                # For P waves in detrended signals, use a more lenient threshold
+                # Detrended signals have smaller amplitudes, so P waves can be valid even if < 3% of R
+                # Use lower threshold for P waves: 0.5% of R amplitude, or absolute minimum of 0.005 mV
+                p_min_ratio = 0.005  # 0.5% instead of 3% (very lenient for detrended signals)
+                p_abs_min = 0.005  # Absolute minimum in mV (very small to allow detrended signals)
+                p_threshold = max(p_min_ratio * r_abs, p_abs_min)
+                
+                if abs(float(height)) < p_threshold:
+                    if verbose:
+                        print(
+                            f"[Cycle {cycle_idx}]: {comp} too small "
+                            f"({abs(float(height)):.3f} < {p_threshold:.3f})."
                         )
                     return None, None
             else:

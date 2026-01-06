@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 ##PyHEARTS IMPORTS
+import logging
 import numpy as np
 import pandas as pd
 from scipy.optimize import curve_fit
@@ -110,17 +111,25 @@ def process_cycle(
 
     cfg = cfg or ProcessCycleConfig()  # safe default
     
+    # Debug: Always log cycle start for first few cycles (regardless of verbose)
+    if cycle_idx < 3:
+        logging.debug(f"[processcycle.py] Starting process_cycle for cycle {cycle_idx}, verbose={verbose}")
+    
     if verbose or plot:
         print(f"[Cycle {cycle_idx}]: Starting process_cycle()")
         print("=" * 80)
 
     # Step 1: Basic Input Validation
     if one_cycle.empty or one_cycle["signal_y"].isnull().any():
+        reason = "empty" if one_cycle.empty else "contains NaN values"
+        if cycle_idx < 3:
+            logging.warning(f"[processcycle.py] Cycle {cycle_idx}: Input cycle {reason}. Skipping this cycle.")
         if verbose:
-            reason = "empty" if one_cycle.empty else "contains NaN values"
             print(f"[Cycle {cycle_idx}]: Input cycle {reason}. Skipping this cycle.")
         return output_dict, previous_r_global_center_idx, previous_p_global_center_idx, None, previous_gauss_features
 
+    if cycle_idx < 3:
+        logging.debug(f"[processcycle.py] Cycle {cycle_idx}: Input validation passed, cycle length={len(one_cycle)}")
     if verbose:
         print(f"[Cycle {cycle_idx}]: Input validation passed.")
 
@@ -187,62 +196,118 @@ def process_cycle(
     # ------------------------------------------------------
     # Step 1: R Peak Detection and Initial Checks
     # ------------------------------------------------------
-        if len(sig_detrended) == 0 or np.isnan(sig_detrended).any():
-            if verbose:
-                print(f"[Cycle {cycle_idx}]: sig_detrended is invalid (empty or NaNs). Skipping this cycle.")
-            return output_dict, previous_r_global_center_idx, previous_p_global_center_idx, None, None
+    # Always log for cycles 21-25 to debug Q/S detection issue
+    if cycle_idx < 20 or cycle_idx % 10 == 0 or (21 <= cycle_idx <= 25):
+        logging.info(f"[CYCLE_START] Cycle {cycle_idx}: Starting R peak detection - sig_detrended len={len(sig_detrended) if sig_detrended is not None else None}")
+    
+    if len(sig_detrended) == 0 or np.isnan(sig_detrended).any():
+        if verbose:
+            print(f"[Cycle {cycle_idx}]: sig_detrended is invalid (empty or NaNs). Skipping this cycle.")
+        if cycle_idx < 20 or cycle_idx % 10 == 0:
+            logging.warning(f"[SIG_INVALID] Cycle {cycle_idx}: sig_detrended is invalid (empty or NaNs). Skipping this cycle.")
+        return output_dict, previous_r_global_center_idx, previous_p_global_center_idx, None, None
 
-        # R Peak Detection: Handle both upright and inverted R peaks
-        # Use absolute value to find the peak with maximum magnitude, regardless of polarity
-        # This is more robust than argmax/argmin alone and handles variable R peak timing
+    # R Peak Detection: Handle both upright and inverted R peaks
+    # Use absolute value to find the peak with maximum magnitude, regardless of polarity
+    # This is more robust than argmax/argmin alone and handles variable R peak timing
+    r_center_idx = None
+    r_height = None
+    try:
         sig_abs = np.abs(sig_detrended)
         r_center_idx = int(np.argmax(sig_abs))
         r_height = sig_detrended[r_center_idx]
-        
-        # Optional: Use cycle center as a sanity check/refinement if available
-        # This helps with very noisy signals but shouldn't override the absolute value method
-        cycle_start_global = int(one_cycle["index"].iloc[0])
-        cycle_end_global = int(one_cycle["index"].iloc[-1])
-        cycle_center_global = (cycle_start_global + cycle_end_global) // 2
-        cycle_center_rel = cycle_center_global - cycle_start_global
-        
-        # If the absolute value peak is far from cycle center (>50ms), check if cycle center is better
-        # This handles cases where detrending creates artifacts
-        max_distance_samples = int(round(50.0 * sampling_rate / 1000.0))
-        if abs(r_center_idx - cycle_center_rel) > max_distance_samples:
-            if 0 <= cycle_center_rel < len(sig_detrended):
-                cycle_center_abs = abs(sig_detrended[cycle_center_rel])
-                # Only use cycle center if it's within 20% of the absolute peak
-                if cycle_center_abs >= 0.8 * sig_abs[r_center_idx]:
-                    if verbose:
-                        print(f"[Cycle {cycle_idx}]: Using cycle center for R peak (abs peak too far: {abs(r_center_idx - cycle_center_rel)} samples)")
-                    r_center_idx = cycle_center_rel
-                    r_height = sig_detrended[r_center_idx]
+        # Always log for cycles 21-25 to debug Q/S detection issue
+        if cycle_idx < 20 or cycle_idx % 10 == 0 or (21 <= cycle_idx <= 25):
+            logging.info(f"[R_DETECT_START] Cycle {cycle_idx}: R peak detection started - r_center_idx={r_center_idx}, r_height={r_height:.4f}")
+    except Exception as e:
+        if cycle_idx < 20 or cycle_idx % 10 == 0:
+            logging.error(f"[R_DETECT_ERROR] Cycle {cycle_idx}: Exception in R peak detection: {e}")
+            import traceback
+            logging.error(traceback.format_exc())
+        r_center_idx = None
+        r_height = None
+    
+    # Optional: Use cycle center as a sanity check/refinement if available
+    # This helps with very noisy signals but shouldn't override the absolute value method
+    cycle_start_global = int(one_cycle["index"].iloc[0])
+    cycle_end_global = int(one_cycle["index"].iloc[-1])
+    cycle_center_global = (cycle_start_global + cycle_end_global) // 2
+    cycle_center_rel = cycle_center_global - cycle_start_global
+    
+    # If the absolute value peak is far from cycle center (>50ms), check if cycle center is better
+    # This handles cases where detrending creates artifacts
+    max_distance_samples = int(round(50.0 * sampling_rate / 1000.0))
+    if abs(r_center_idx - cycle_center_rel) > max_distance_samples:
+        if 0 <= cycle_center_rel < len(sig_detrended):
+            cycle_center_abs = abs(sig_detrended[cycle_center_rel])
+            # Only use cycle center if it's within 20% of the absolute peak
+            if cycle_center_abs >= 0.8 * sig_abs[r_center_idx]:
+                if verbose:
+                    print(f"[Cycle {cycle_idx}]: Using cycle center for R peak (abs peak too far: {abs(r_center_idx - cycle_center_rel)} samples)")
+                r_center_idx = cycle_center_rel
+                r_height = sig_detrended[r_center_idx]
+    
+    # Debug: Always log R peak detection (sample every 50 cycles to avoid spam)
+    if cycle_idx % 50 == 0 or cycle_idx < 10:
+        try:
+            r_polarity = "INVERTED" if r_height < 0 else "UPRIGHT"
+            r_global = int(xs_samples[r_center_idx]) if r_center_idx < len(xs_samples) else None
+            logging.info(f"[R_DETECT] Cycle {cycle_idx}: R detected at rel_idx={r_center_idx}, global_idx={r_global}, height={r_height:.4f} mV ({r_polarity})")
+        except Exception as e:
+            if cycle_idx < 20 or cycle_idx % 10 == 0:
+                logging.error(f"[R_DETECT_EXCEPTION] Cycle {cycle_idx}: Exception in R_DETECT logging: {e}")
+                import traceback
+                logging.error(traceback.format_exc())
         
         if verbose:
             r_polarity = "INVERTED" if r_height < 0 else "UPRIGHT"
             print(f"[Cycle {cycle_idx}]: R peak detected at {r_center_idx} (cycle-rel), value: {r_height:.4f} mV ({r_polarity})")
 
-        # ------------------------------------------------------
-        # Step 2: R Peak Stdev and Dynamic Offset
-        # ------------------------------------------------------
-        if verbose:
-            print(f"[Cycle {cycle_idx}]: Finding half-height indices for R peak...")
+    # ------------------------------------------------------
+    # Step 2: R Peak Stdev and Dynamic Offset
+    # ------------------------------------------------------
+    if verbose:
+        print(f"[Cycle {cycle_idx}]: Finding half-height indices for R peak...")
 
+    # Exception handling for compute_gauss_std
+    r_std = None
+    r_std_dict = {}
+    try:
         r_guess = {"R": (r_center_idx, r_height)}
         r_std_dict = compute_gauss_std(sig_detrended, r_guess)
         r_std = r_std_dict.get("R")
+        
+        # Debug: Log that compute_gauss_std completed (sample every 10 cycles or cycles 21-25)
+        if cycle_idx < 20 or cycle_idx % 10 == 0 or (21 <= cycle_idx <= 25):
+            logging.info(f"[GAUSS_STD] Cycle {cycle_idx}: compute_gauss_std completed - r_std={r_std}, r_std_dict={r_std_dict}")
+    except Exception as e:
+        # Log exception but don't crash - use fallback values
+        # Always log for cycles 21-25 to debug Q/S detection issue
+        if cycle_idx < 20 or cycle_idx % 10 == 0 or (21 <= cycle_idx <= 25):
+            logging.error(f"[GAUSS_STD_ERROR] Cycle {cycle_idx}: Exception in compute_gauss_std: {e}")
+            import traceback
+            logging.error(f"[GAUSS_STD_ERROR] Cycle {cycle_idx} traceback:\n{traceback.format_exc()}")
+        r_std = None
+        r_std_dict = {}
 
-        if r_center_idx is None:
-            if verbose:
-                print(f"[Cycle {cycle_idx}]: Error -  R peak not detected — skipping cycle.")
-            return output_dict, previous_r_global_center_idx, previous_p_global_center_idx, None, previous_gauss_features
+    if r_center_idx is None:
+        if verbose:
+            print(f"[Cycle {cycle_idx}]: Error -  R peak not detected — skipping cycle.")
+        if cycle_idx < 20 or cycle_idx % 10 == 0:
+            logging.warning(f"[EARLY_RETURN_R_NONE] Cycle {cycle_idx}: Returning early because r_center_idx is None")
+        return output_dict, previous_r_global_center_idx, previous_p_global_center_idx, None, previous_gauss_features
 
-        if r_std is None:
-            if verbose:
-                print(f"[Cycle {cycle_idx}]: Could not estimate std for R peak.")
+    if r_std is None:
+        if verbose:
+            print(f"[Cycle {cycle_idx}]: Could not estimate std for R peak.")
+        if cycle_idx < 20 or cycle_idx % 10 == 0:
+            logging.warning(f"[GAUSS_STD] Cycle {cycle_idx}: r_std is None - continuing anyway")
 
-        # Dynamic offset (in samples)
+    # Dynamic offset (in samples)
+    offset_samples = None
+    q_start = None
+    s_end = None
+    try:
         offset_samples, _, _, q_start, s_end = calc_wavelet_dynamic_offset(
             ecg_signal=sig_detrended,
             sampling_rate=sampling_rate,
@@ -253,16 +318,78 @@ def process_cycle(
             plot=plot,
             cfg=cfg,
         )
+        # Debug: Log successful completion (always log for cycles 21-25)
+        if cycle_idx < 20 or cycle_idx % 10 == 0 or (21 <= cycle_idx <= 25):
+            logging.info(f"[WAVELET_OFFSET] Cycle {cycle_idx}: calc_wavelet_dynamic_offset completed successfully - offset_samples={offset_samples}, q_start={q_start}, s_end={s_end}")
+    except Exception as e:
+        # Log exception but don't crash - use fallback values
+        # Always log for cycles 21-25 to debug Q/S detection issue
+        if cycle_idx < 20 or cycle_idx % 10 == 0 or (21 <= cycle_idx <= 25):
+            logging.error(f"[WAVELET_OFFSET_ERROR] Cycle {cycle_idx}: Exception in calc_wavelet_dynamic_offset: {e}")
+            import traceback
+            logging.error(f"[WAVELET_OFFSET_ERROR] Cycle {cycle_idx} traceback:\n{traceback.format_exc()}")
+        # Fallback: use default values
+        offset_samples = None
+        q_start = None
+        s_end = len(sig_detrended) - 100 if len(sig_detrended) > 100 else len(sig_detrended) - 1
+        if cycle_idx < 20 or cycle_idx % 10 == 0 or (21 <= cycle_idx <= 25):
+            logging.warning(f"[WAVELET_OFFSET_FALLBACK] Cycle {cycle_idx}: Using fallback values - q_start={q_start}, s_end={s_end}, sig_len={len(sig_detrended)}")
+    
+    # Debug: Log that calc_wavelet_dynamic_offset completed (always log for cycles 21-25)
+    if cycle_idx < 20 or cycle_idx % 10 == 0 or (21 <= cycle_idx <= 25):
+        logging.info(f"[WAVELET_OFFSET] Cycle {cycle_idx}: calc_wavelet_dynamic_offset completed - offset_samples={offset_samples}, q_start={q_start}, s_end={s_end}")
 
-        # ------------------------------------------------------
-        # Step 3: Peak Detection - Q, P, S, T
-        # ------------------------------------------------------
+    # ------------------------------------------------------
+    # Step 3: Peak Detection - Q, P, S, T
+    # ------------------------------------------------------
+    
+    # Debug: Log that we're starting Q/P/S/T detection (always log for cycles 21-25)
+    if cycle_idx < 20 or cycle_idx % 10 == 0 or (21 <= cycle_idx <= 25):
+        logging.info(f"[PEAK_DETECT_START] Cycle {cycle_idx}: Starting Q/P/S/T detection after R detection and wavelet offset")
 
         # Clamp s_end to signal length
         if s_end is None or s_end >= len(sig_detrended):
             s_end = len(sig_detrended) - 100
             if verbose:
                 print(f"[Cycle {cycle_idx}]: Adjusted S max index to within signal bounds: {s_end}")
+
+        # Initialize Q and S center indices (will be set later)
+        q_center_idx = None
+        s_center_idx = None
+        
+        # ==============================================================================
+        # COMPUTE QRS BOUNDARIES EARLY (BEFORE P/T DETECTION)
+        # ==============================================================================
+        # CRITICAL: Compute QRS boundaries BEFORE P/T detection so they can be used
+        # for P/T search windows. This is essential because P/T detection depends on
+        # accurate QRS boundaries, not just Q/S peak positions.
+        # Note: Q and S peaks haven't been detected yet, so we'll compute boundaries
+        # from R peak only, then update them after Q/S detection if available.
+        qrs_onset_idx_early = None
+        qrs_end_idx_early = None
+        if r_center_idx is not None:
+            # Compute QRS onset (from R peak, Q will be detected later)
+            qrs_onset_idx_early = detect_qrs_onset_derivative(
+                signal=sig_detrended,
+                q_peak_idx=None,  # Q not detected yet, search from R
+                r_peak_idx=r_center_idx,
+                sampling_rate=sampling_rate,
+                search_window_ms=100.0,
+                verbose=verbose,
+                cycle_idx=cycle_idx,
+            )
+            # Compute QRS end (from R peak, S will be detected later)
+            qrs_end_idx_early = detect_qrs_end_derivative(
+                signal=sig_detrended,
+                s_peak_idx=None,  # S not detected yet, search from R
+                r_peak_idx=r_center_idx,
+                sampling_rate=sampling_rate,
+                search_window_ms=100.0,
+                verbose=verbose,
+                cycle_idx=cycle_idx,
+            )
+            if verbose:
+                print(f"[Cycle {cycle_idx}]: Early QRS boundaries: onset={qrs_onset_idx_early}, end={qrs_end_idx_early}")
 
         # --- Q Peak ---
         # Ensure Q search is before R (fix temporal order violations)
@@ -284,16 +411,39 @@ def process_cycle(
                     if verbose:
                         print(f"[Cycle {cycle_idx}]: Expanded Q search window to {q_start} (150ms before R at {r_center_idx})")
         
-        q_center_idx, q_height, _ = find_peaks(
-            sig_detrended,
-            xs_rel_idxs,
-            q_start,
-            r_center_idx,
-            mode="min",
-            verbose=verbose,
-            label="Q",
-            cycle_idx=cycle_idx,
-        )
+        # Ensure q_start is valid before calling find_peaks
+        if q_start is None:
+            # Fallback: use default search window before R
+            if r_center_idx is not None:
+                q_start = max(0, r_center_idx - int(round(0.15 * sampling_rate)))  # 150ms before R
+            else:
+                q_start = 0
+        
+        # Exception handling for Q peak detection
+        q_center_idx, q_height = None, None
+        try:
+            q_center_idx, q_height, _ = find_peaks(
+                sig_detrended,
+                xs_rel_idxs,
+                q_start,
+                r_center_idx,
+                mode="min",
+                verbose=verbose,
+                label="Q",
+                cycle_idx=cycle_idx,
+            )
+            # Always log for cycles 21-25 to debug Q/S detection issue
+            if cycle_idx < 20 or cycle_idx % 10 == 0 or (21 <= cycle_idx <= 25):
+                if q_center_idx is not None:
+                    logging.info(f"[Q_DETECT] Cycle {cycle_idx}: Q peak detected at idx={q_center_idx}, height={q_height:.4f}")
+                else:
+                    logging.warning(f"[Q_DETECT] Cycle {cycle_idx}: Q peak NOT detected - q_start={q_start}, r_center_idx={r_center_idx}, sig_len={len(sig_detrended)}")
+        except Exception as e:
+            if cycle_idx < 20 or cycle_idx % 10 == 0:
+                logging.error(f"[Q_DETECT_ERROR] Cycle {cycle_idx}: Exception in Q peak detection: {e}")
+                import traceback
+                logging.error(traceback.format_exc())
+            q_center_idx, q_height = None, None
 
         if q_center_idx is None and verbose:
             print(f"[Cycle {cycle_idx}]: Q peak rejected — not included in fit.")
@@ -464,18 +614,26 @@ def process_cycle(
                         
                         # Call derivative-validated P wave detection with CYCLE-RELATIVE indices
                         # The function works on sig_detrended (cycle segment) with cycle-relative indices
-                        p_peak_idx, p_amplitude, p_onset_idx, p_offset_idx = detect_p_wave_derivative_validated(
-                            signal=sig_detrended,
-                            qrs_onset_idx=qrs_onset_idx,  # Cycle-relative
-                            r_peak_idx=r_center_idx,  # Cycle-relative
-                            r_amplitude=r_height,
-                            sampling_rate=sampling_rate,
-                            previous_t_end_idx=previous_t_end_idx,  # Cycle-relative (or None)
-                            previous_p_end_idx=previous_p_end_idx,  # Cycle-relative (or None)
-                            max_derivative=max_derivative,
-                            verbose=True,  # Force verbose for debugging
-                            cycle_idx=cycle_idx,
-                        )
+                        try:
+                            p_peak_idx, p_amplitude, p_onset_idx, p_offset_idx = detect_p_wave_derivative_validated(
+                                signal=sig_detrended,
+                                qrs_onset_idx=qrs_onset_idx,  # Cycle-relative
+                                r_peak_idx=r_center_idx,  # Cycle-relative
+                                r_amplitude=r_height,
+                                sampling_rate=sampling_rate,
+                                previous_t_end_idx=previous_t_end_idx,  # Cycle-relative (or None)
+                                previous_p_end_idx=previous_p_end_idx,  # Cycle-relative (or None)
+                                max_derivative=max_derivative,
+                                verbose=True,  # Force verbose for debugging
+                                cycle_idx=cycle_idx,
+                            )
+                        except Exception as e:
+                            # Log exception but don't crash - set P to None and continue
+                            if cycle_idx < 20 or cycle_idx % 10 == 0:
+                                logging.error(f"[P_DETECT_EXCEPTION] Cycle {cycle_idx}: Exception in detect_p_wave_derivative_validated: {e}")
+                                import traceback
+                                logging.error(traceback.format_exc())
+                            p_peak_idx, p_amplitude, p_onset_idx, p_offset_idx = None, None, None, None
                         
                         if verbose:
                             if p_peak_idx is not None:
@@ -549,14 +707,22 @@ def process_cycle(
             # Use Q position to distinguish P from Q (helps bound search window correctly)
             # Only use standard method if derivative-validated/improved/fixed-window methods didn't find a peak
             if p_center_idx is None:  # Only use standard method if advanced methods didn't find a peak
-                p_peak_end_idx = q_center_idx if q_center_idx is not None else q_center_idx_for_p_validation
-                if verbose:
-                    print(f"[Cycle {cycle_idx}]: P detection: q_center_idx={q_center_idx}, q_center_idx_for_p_validation={q_center_idx_for_p_validation}, p_peak_end_idx={p_peak_end_idx}")
-                if p_peak_end_idx is None:
-                    # Fallback to R if no Q detected
-                    p_peak_end_idx = r_center_idx
+                # CRITICAL: Use QRS onset boundary (computed early) instead of Q peak position
+                # This ensures P detection works even when Q peak is not detected
+                if qrs_onset_idx_early is not None:
+                    p_peak_end_idx = qrs_onset_idx_early
                     if verbose:
-                        print(f"[Cycle {cycle_idx}]: P detection: Using R as fallback, r_center_idx={r_center_idx}, p_peak_end_idx={p_peak_end_idx}")
+                        print(f"[Cycle {cycle_idx}]: P detection: Using QRS onset boundary={qrs_onset_idx_early} (Q peak={q_center_idx})")
+                else:
+                    # Fallback to Q peak if QRS onset not available
+                    p_peak_end_idx = q_center_idx if q_center_idx is not None else q_center_idx_for_p_validation
+                    if verbose:
+                        print(f"[Cycle {cycle_idx}]: P detection: q_center_idx={q_center_idx}, q_center_idx_for_p_validation={q_center_idx_for_p_validation}, p_peak_end_idx={p_peak_end_idx}")
+                    if p_peak_end_idx is None:
+                        # Fallback to R if no Q detected
+                        p_peak_end_idx = r_center_idx
+                        if verbose:
+                            print(f"[Cycle {cycle_idx}]: P detection: Using R as fallback, r_center_idx={r_center_idx}, p_peak_end_idx={p_peak_end_idx}")
                 
                 if p_peak_end_idx is None or p_peak_end_idx < 2:
                     if verbose:
@@ -581,6 +747,7 @@ def process_cycle(
                     
                     # Determine search start: prefer previous R peak, fallback to wider window
                     # Search from previous R to current R (entire R-R interval)
+                    search_start_idx = None  # Initialize to ensure it's always set
                     if previous_r_global_center_idx is not None:
                         # Map previous R peak to cycle-relative index
                         cycle_start_global = int(one_cycle["index"].iloc[0]) if "index" in one_cycle.columns else int(one_cycle["signal_x"].iloc[0])
@@ -608,23 +775,24 @@ def process_cycle(
                                     print(f"[Cycle {cycle_idx}]: P search from estimated RR interval ({estimated_rr_ms:.1f}ms) - previous R outside cycle")
                                 else:
                                     print(f"[Cycle {cycle_idx}]: P search from max window ({max_p_window_ms:.1f}ms) - previous R outside cycle")
-                    else:
+                    
+                    if search_start_idx is None:
                         # No previous R available, estimate RR interval or use physiological maximum
                         estimated_rr_ms = None
-                    if original_r_peaks is not None and len(original_r_peaks) >= 2:
-                        # Estimate RR interval from detected R peaks
-                        rr_intervals = np.diff(original_r_peaks) / sampling_rate * 1000.0
-                        # Use median RR interval, clamped to physiological range (500-1500ms)
-                        estimated_rr_ms = np.clip(np.median(rr_intervals), 500.0, 1500.0)
-                    
-                    max_p_window_ms = estimated_rr_ms if estimated_rr_ms is not None else cfg.shape_max_window_ms.get("P", 1200)
-                    max_p_window_samples = int(round(max_p_window_ms * sampling_rate / 1000.0))
-                    search_start_idx = max(0, search_end_idx - max_p_window_samples)
-                    if verbose:
-                        if estimated_rr_ms is not None:
-                            print(f"[Cycle {cycle_idx}]: P search from estimated RR interval ({estimated_rr_ms:.1f}ms) - no previous R available")
-                        else:
-                            print(f"[Cycle {cycle_idx}]: P search from max window ({max_p_window_ms:.1f}ms) - no previous R available")
+                        if original_r_peaks is not None and len(original_r_peaks) >= 2:
+                            # Estimate RR interval from detected R peaks
+                            rr_intervals = np.diff(original_r_peaks) / sampling_rate * 1000.0
+                            # Use median RR interval, clamped to physiological range (500-1500ms)
+                            estimated_rr_ms = np.clip(np.median(rr_intervals), 500.0, 1500.0)
+                        
+                        max_p_window_ms = estimated_rr_ms if estimated_rr_ms is not None else cfg.shape_max_window_ms.get("P", 1200)
+                        max_p_window_samples = int(round(max_p_window_ms * sampling_rate / 1000.0))
+                        search_start_idx = max(0, search_end_idx - max_p_window_samples)
+                        if verbose:
+                            if estimated_rr_ms is not None:
+                                print(f"[Cycle {cycle_idx}]: P search from estimated RR interval ({estimated_rr_ms:.1f}ms) - no previous R available")
+                            else:
+                                print(f"[Cycle {cycle_idx}]: P search from max window ({max_p_window_ms:.1f}ms) - no previous R available")
                     
                     start_idx = search_start_idx
                     pre_qrs_len = search_end_idx  # Update to use safety-margin-adjusted end
@@ -642,64 +810,66 @@ def process_cycle(
                             # Edge artifacts occur when filtering short segments, so we pad the segment
                             filter_padding_ms = 50  # Extra samples on each side to avoid edge artifacts
                             filter_padding_samples = int(round(filter_padding_ms * sampling_rate / 1000.0))
-                    filter_start = max(0, start_idx - filter_padding_samples)
-                    filter_end = min(len(sig_detrended), pre_qrs_len + filter_padding_samples)
-                    
-                    # Filter larger segment
-                    p_search_segment_large = sig_detrended[filter_start:filter_end]
-                    
-                    if len(p_search_segment_large) >= 10:
-                        # Apply band-pass filter to larger segment
-                        p_search_filtered_large = bandpass_filter_pwave(
-                            p_search_segment_large,
-                            sampling_rate,
-                            lowcut=cfg.pwave_bandpass_low_hz,
-                            highcut=cfg.pwave_bandpass_high_hz,
-                            order=cfg.pwave_bandpass_order,
-                        )
-                        
-                        # Extract original window from filtered segment (ignore edge padding)
-                        # Calculate padding actually used (may be less if at signal boundaries)
-                        actual_padding_left = start_idx - filter_start
-                        actual_padding_right = filter_end - pre_qrs_len
-                        
-                        # Extract the portion corresponding to the original search window
-                        extract_start = actual_padding_left
-                        extract_end = len(p_search_filtered_large) - actual_padding_right
-                        
-                        if extract_end > extract_start:
-                            p_search_filtered = p_search_filtered_large[extract_start:extract_end]
                         else:
-                            p_search_filtered = p_search_filtered_large
+                            filter_padding_samples = 0
+                        filter_start = max(0, start_idx - filter_padding_samples)
+                        filter_end = min(len(sig_detrended), pre_qrs_len + filter_padding_samples)
                         
-                        # Ensure extracted segment matches expected window size
-                        expected_size = pre_qrs_len - start_idx
-                        if len(p_search_filtered) != expected_size:
-                            if verbose:
-                                print(f"[Cycle {cycle_idx}]: Warning: Filtered segment size ({len(p_search_filtered)}) doesn't match expected window size ({expected_size}), adjusting...")
-                            # Adjust to match expected size
-                            if len(p_search_filtered) > expected_size:
-                                p_search_filtered = p_search_filtered[:expected_size]
+                        # Filter larger segment
+                        p_search_segment_large = sig_detrended[filter_start:filter_end]
+                        
+                        if len(p_search_segment_large) >= 10:
+                            # Apply band-pass filter to larger segment
+                            p_search_filtered_large = bandpass_filter_pwave(
+                                p_search_segment_large,
+                                sampling_rate,
+                                lowcut=cfg.pwave_bandpass_low_hz,
+                                highcut=cfg.pwave_bandpass_high_hz,
+                                order=cfg.pwave_bandpass_order,
+                            )
+                            
+                            # Extract original window from filtered segment (ignore edge padding)
+                            # Calculate padding actually used (may be less if at signal boundaries)
+                            actual_padding_left = start_idx - filter_start
+                            actual_padding_right = filter_end - pre_qrs_len
+                            
+                            # Extract the portion corresponding to the original search window
+                            extract_start = actual_padding_left
+                            extract_end = len(p_search_filtered_large) - actual_padding_right
+                            
+                            if extract_end > extract_start:
+                                p_search_filtered = p_search_filtered_large[extract_start:extract_end]
                             else:
-                                # Pad if too short (shouldn't happen, but handle gracefully)
-                                padding_needed = expected_size - len(p_search_filtered)
-                                p_search_filtered = np.pad(p_search_filtered, (0, padding_needed), mode='edge')
-                        
-                        # Map back to full signal indices for find_peaks
-                        sig_for_p_detection = sig_detrended.copy()
-                        sig_for_p_detection[start_idx:pre_qrs_len] = p_search_filtered
-                        
-                        # Try finding P-wave in filtered signal
-                        # Step 5: Try both positive and negative P-waves (inverted leads)
-                        p_center_idx, p_height = None, None
-                        
-                        # First try positive P-wave (normal)
-                        # Use derivative-based detection for better accuracy
-                        p_center_idx_pos, p_height_pos, _ = find_peaks(
-                            signal=sig_for_p_detection,
-                            xs=xs_rel_idxs,
-                            start_idx=start_idx,
-                            end_idx=pre_qrs_len,
+                                p_search_filtered = p_search_filtered_large
+                            
+                            # Ensure extracted segment matches expected window size
+                            expected_size = pre_qrs_len - start_idx
+                            if len(p_search_filtered) != expected_size:
+                                if verbose:
+                                    print(f"[Cycle {cycle_idx}]: Warning: Filtered segment size ({len(p_search_filtered)}) doesn't match expected window size ({expected_size}), adjusting...")
+                                # Adjust to match expected size
+                                if len(p_search_filtered) > expected_size:
+                                    p_search_filtered = p_search_filtered[:expected_size]
+                                else:
+                                    # Pad if too short (shouldn't happen, but handle gracefully)
+                                    padding_needed = expected_size - len(p_search_filtered)
+                                    p_search_filtered = np.pad(p_search_filtered, (0, padding_needed), mode='edge')
+                            
+                            # Map back to full signal indices for find_peaks
+                            sig_for_p_detection = sig_detrended.copy()
+                            sig_for_p_detection[start_idx:pre_qrs_len] = p_search_filtered
+                            
+                            # Try finding P-wave in filtered signal
+                            # Step 5: Try both positive and negative P-waves (inverted leads)
+                            p_center_idx, p_height = None, None
+                            
+                            # First try positive P-wave (normal)
+                            # Use derivative-based detection for better accuracy
+                            p_center_idx_pos, p_height_pos, _ = find_peaks(
+                                signal=sig_for_p_detection,
+                                xs=xs_rel_idxs,
+                                start_idx=start_idx,
+                                end_idx=pre_qrs_len,
                             mode="max",
                             verbose=verbose,
                             label="P",
@@ -786,6 +956,14 @@ def process_cycle(
                 
                 # Fallback: if band-pass failed or not enabled, try unfiltered signal
                 if p_center_idx is None:
+                    # Ensure start_idx and pre_qrs_len are set (they should be set earlier, but check to be safe)
+                    if 'start_idx' not in locals() or 'pre_qrs_len' not in locals():
+                        # Fallback: use default values if not set
+                        pre_qrs_len = q_center_idx if q_center_idx is not None else r_center_idx
+                        if pre_qrs_len is None or pre_qrs_len < 2:
+                            pre_qrs_len = len(sig_detrended) // 2
+                        start_idx = max(0, pre_qrs_len - int(round(1200 * sampling_rate / 1000.0)))  # 1200ms window
+                    
                     sig_for_p_detection = sig_detrended
                     
                     # Try both positive and negative P-waves
@@ -911,29 +1089,51 @@ def process_cycle(
                             p_center_idx, p_height = None, None
                 
         
-        if p_center_idx is None and verbose:
-            print(f"[Cycle {cycle_idx}]: P peak rejected — not included in fit.")
+        if p_center_idx is None:
+            # Debug: Log why P detection failed (sample every 10 cycles)
+            if cycle_idx < 20 or cycle_idx % 10 == 0:
+                logging.warning(f"[P_DETECT] Cycle {cycle_idx}: P peak NOT detected - p_center_idx=None, p_height=None")
+            if verbose:
+                print(f"[Cycle {cycle_idx}]: P peak rejected — not included in fit.")
 
      
         # --- S Peak ---
         # S Peak Detection
         # Start S search AFTER R peak (r_center_idx + 1) to avoid detecting R and S at same index
         s_search_start = r_center_idx + 1 if r_center_idx is not None else None
+        s_center_idx, s_height = None, None
+        
         if r_center_idx is None or s_end is None or s_end <= s_search_start:
             if verbose:
                 print(f"[Cycle {cycle_idx}]: Cannot search for S peak — invalid R or S window.")
+            if cycle_idx < 20 or cycle_idx % 10 == 0:
+                logging.warning(f"[S_DETECT] Cycle {cycle_idx}: Cannot search for S peak - r_center_idx={r_center_idx}, s_end={s_end}, s_search_start={s_search_start}, sig_len={len(sig_detrended)}")
             s_center_idx, s_height = None, None
         else:
-            s_center_idx, s_height, _ = find_peaks(
-                sig_detrended,
-                xs_rel_idxs,
-                s_search_start,
-                s_end,
-                mode="min",
-                verbose=verbose,
-                label="S",
-                cycle_idx=cycle_idx,
-            )
+            # Exception handling for S peak detection
+            try:
+                s_center_idx, s_height, _ = find_peaks(
+                    sig_detrended,
+                    xs_rel_idxs,
+                    s_search_start,
+                    s_end,
+                    mode="min",
+                    verbose=verbose,
+                    label="S",
+                    cycle_idx=cycle_idx,
+                )
+                # Always log for cycles 21-25 to debug Q/S detection issue
+                if cycle_idx < 20 or cycle_idx % 10 == 0 or (21 <= cycle_idx <= 25):
+                    if s_center_idx is not None:
+                        logging.info(f"[S_DETECT] Cycle {cycle_idx}: S peak detected at idx={s_center_idx}, height={s_height:.4f}")
+                    else:
+                        logging.warning(f"[S_DETECT] Cycle {cycle_idx}: S peak NOT detected - s_search_start={s_search_start}, s_end={s_end}, sig_len={len(sig_detrended)}")
+            except Exception as e:
+                if cycle_idx < 20 or cycle_idx % 10 == 0:
+                    logging.error(f"[S_DETECT_ERROR] Cycle {cycle_idx}: Exception in S peak detection: {e}")
+                    import traceback
+                    logging.error(traceback.format_exc())
+                s_center_idx, s_height = None, None
 
         if s_center_idx is None and verbose:
             print(f"[Cycle {cycle_idx}]: S peak rejected — not included in fit.")
@@ -992,8 +1192,16 @@ def process_cycle(
                 t_start_offset_ms = 100.0
                 t_start_from_r = r_center_idx + int(round(t_start_offset_ms * sampling_rate / 1000.0))
                 
-                # Adjustment: use S wave end + 20ms if that's later
-                if s_center_idx is not None:
+                # CRITICAL: Use QRS end boundary (computed early) instead of S peak position
+                # This ensures T detection works even when S peak is not detected
+                if qrs_end_idx_early is not None:
+                    kdis_ms = 20.0  # 20ms margin (kdis parameter)
+                    t_start_from_qrs_end = qrs_end_idx_early + int(round(kdis_ms * sampling_rate / 1000.0))
+                    t_start_idx = max(t_start_from_r, t_start_from_qrs_end)  # Use later of the two
+                    if verbose:
+                        print(f"[Cycle {cycle_idx}]: T search start adjusted: R+100ms={t_start_from_r}, QRS_end+20ms={t_start_from_qrs_end}, using={t_start_idx} (S peak={s_center_idx})")
+                elif s_center_idx is not None:
+                    # Fallback to S peak if QRS end not available
                     kdis_ms = 20.0  # 20ms margin (kdis parameter)
                     t_start_from_s = s_center_idx + int(round(kdis_ms * sampling_rate / 1000.0))
                     t_start_idx = max(t_start_from_r, t_start_from_s)  # Use later of the two
@@ -1168,7 +1376,11 @@ def process_cycle(
                     print(f"[Cycle {cycle_idx}]: Excluding {label} from Gaussian fit due to missing or invalid values.")
                 continue
             guess_idxs[label] = (int(center), float(height))
-            original_peak_indices[label] = int(center)  # Store original peak for timing accuracy
+            original_peak_indices[label] = int(center)
+        
+        # Debug: Log guess_idxs status (sample every 10 cycles)
+        if cycle_idx < 20 or cycle_idx % 10 == 0:
+            logging.info(f"[GUESS_IDXS] Cycle {cycle_idx}: After building guess_idxs - keys={list(guess_idxs.keys())}, R in guess_idxs={'R' in guess_idxs}")  # Store original peak for timing accuracy
         if verbose:
             print(f"[Cycle {cycle_idx}]: DEBUG - After building guess_idxs: guess_idxs.get('P')={guess_idxs.get('P')}, original_peak_indices.get('P')={original_peak_indices.get('P')}")
 
@@ -1245,6 +1457,10 @@ def process_cycle(
         # Determine valid components (keys)
         valid_components = list(guess_dict.keys())
 
+        # Debug: Always log guess_dict status (sample every 10 cycles)
+        if cycle_idx < 20 or cycle_idx % 10 == 0:
+            logging.info(f"[GUESS_DICT] Cycle {cycle_idx}: guess_dict keys={list(guess_dict.keys())}, valid_components={valid_components}, R in guess_dict={'R' in guess_dict}")
+
         if verbose:
             print(f"[Cycle {cycle_idx}]: Valid components for fitting: {valid_components}")
 
@@ -1252,6 +1468,9 @@ def process_cycle(
         valid_guess_list = [guess_dict[comp] for comp in valid_components if comp in guess_dict]
 
         if not valid_guess_list:
+            # CRITICAL: If no valid guesses, we still need to ensure R is in peak_data
+            if cycle_idx < 20 or cycle_idx % 10 == 0:
+                logging.warning(f"[GUESS_DICT] Cycle {cycle_idx}: No valid guesses found! guess_dict={guess_dict}, guess_idxs={guess_idxs if 'guess_idxs' in locals() else 'N/A'}, R in guess_idxs={'R' in guess_idxs if 'guess_idxs' in locals() else 'N/A'}")
             if verbose:
                 print(f"[Cycle {cycle_idx}]: No valid guesses found for curve_fit.")
             valid_guess = np.empty((0, params_per_peak))
@@ -1365,7 +1584,13 @@ def process_cycle(
 
         if verbose:
             print(f"[Cycle {cycle_idx}]: Generating fitted signal...")
-        fit = fit_func(xs_rel_idxs, *gaussian_features_to_use)
+        try:
+            fit = fit_func(xs_rel_idxs, *gaussian_features_to_use)
+        except Exception as e:
+            # If fit generation fails (e.g., NaN in gaussian_features_to_use), create empty fit
+            if cycle_idx < 20 or cycle_idx % 10 == 0:
+                logging.warning(f"[FIT_GEN] Cycle {cycle_idx}: fit_func failed: {e}. Creating empty fit.")
+            fit = np.zeros_like(xs_rel_idxs)
        
         if plot:
             plot_fit(xs_rel_idxs, sig_detrended, fit)
@@ -1380,6 +1605,13 @@ def process_cycle(
         SAMPLE_TO_MS = 1000.0 / sampling_rate
         
         gauss_idxs = {}
+        
+        # Debug: Always log fitting status for first few cycles (regardless of verbose)
+        if cycle_idx < 3:
+            logging.debug(f"[processcycle.py] After Gaussian fitting: fitting_success={fitting_success}, valid_components={valid_components}, len(centers_arr)={len(centers_arr) if 'centers_arr' in locals() else 'N/A'}")
+            if not fitting_success:
+                logging.warning(f"[processcycle.py] Cycle {cycle_idx}: Gaussian fitting FAILED!")
+        
         if verbose:
             print(f"[Cycle {cycle_idx}]: DEBUG - After Gaussian fitting: valid_components={valid_components}")
         for i, comp in enumerate(valid_components):
@@ -1477,6 +1709,90 @@ def process_cycle(
             for comp, vals in gauss_idxs.items()
             if vals is not None
         }
+        
+        # CRITICAL: Ensure R is always in peak_data if it was detected
+        # This handles cases where Gaussian fitting failed or R wasn't included in the fit
+        if "R" not in peak_data and r_center_idx is not None and r_height is not None:
+            r_center_idx_rel = r_center_idx  # Already cycle-relative
+            r_global_center_idx = (
+                int(xs_samples[r_center_idx_rel])
+                if r_center_idx_rel is not None and r_center_idx_rel < len(xs_samples)
+                else None
+            )
+            if r_global_center_idx is not None:
+                peak_data["R"] = {
+                    "global_center_idx": r_global_center_idx,
+                    "center_idx": r_center_idx_rel,
+                    "gauss_center": None,  # Not in Gaussian fit
+                    "gauss_height": float(r_height),
+                    "gauss_stdev_samples": None,
+                    "gauss_fwhm_samples": None,
+                    "gauss_stdev_ms": None,
+                    "gauss_fwhm_ms": None,
+                }
+                if cycle_idx < 20 or cycle_idx % 10 == 0 or (21 <= cycle_idx <= 25):
+                    logging.info(f"[PEAK_DATA_R_FALLBACK] Cycle {cycle_idx}: Added R to peak_data immediately after building from gauss_idxs (R was missing)")
+        
+        # CRITICAL: Ensure Q is always in peak_data if it was detected
+        # This handles cases where Q was detected but not included in the Gaussian fit
+        if "Q" not in peak_data and q_center_idx is not None and q_height is not None:
+            q_center_idx_rel = q_center_idx  # Already cycle-relative
+            q_global_center_idx = (
+                int(xs_samples[q_center_idx_rel])
+                if q_center_idx_rel is not None and q_center_idx_rel < len(xs_samples)
+                else None
+            )
+            if q_global_center_idx is not None:
+                peak_data["Q"] = {
+                    "global_center_idx": q_global_center_idx,
+                    "center_idx": q_center_idx_rel,
+                    "gauss_center": None,  # Not in Gaussian fit
+                    "gauss_height": float(q_height),
+                    "gauss_stdev_samples": None,
+                    "gauss_fwhm_samples": None,
+                    "gauss_stdev_ms": None,
+                    "gauss_fwhm_ms": None,
+                }
+                if cycle_idx < 20 or cycle_idx % 10 == 0 or (21 <= cycle_idx <= 25):
+                    logging.info(f"[PEAK_DATA_Q_FALLBACK] Cycle {cycle_idx}: Added Q to peak_data (Q was detected but not in Gaussian fit): center_idx={q_center_idx_rel}, global={q_global_center_idx}, height={q_height:.4f}")
+        
+        # CRITICAL: Ensure S is always in peak_data if it was detected
+        # This handles cases where S was detected but not included in the Gaussian fit
+        if "S" not in peak_data and s_center_idx is not None and s_height is not None:
+            s_center_idx_rel = s_center_idx  # Already cycle-relative
+            s_global_center_idx = (
+                int(xs_samples[s_center_idx_rel])
+                if s_center_idx_rel is not None and s_center_idx_rel < len(xs_samples)
+                else None
+            )
+            if s_global_center_idx is not None:
+                peak_data["S"] = {
+                    "global_center_idx": s_global_center_idx,
+                    "center_idx": s_center_idx_rel,
+                    "gauss_center": None,  # Not in Gaussian fit
+                    "gauss_height": float(s_height),
+                    "gauss_stdev_samples": None,
+                    "gauss_fwhm_samples": None,
+                    "gauss_stdev_ms": None,
+                    "gauss_fwhm_ms": None,
+                }
+                if cycle_idx < 20 or cycle_idx % 10 == 0 or (21 <= cycle_idx <= 25):
+                    logging.info(f"[PEAK_DATA_S_FALLBACK] Cycle {cycle_idx}: Added S to peak_data (S was detected but not in Gaussian fit): center_idx={s_center_idx_rel}, global={s_global_center_idx}, height={s_height:.4f}")
+        
+        # Debug: Check if peak_data is empty after building from gauss_idxs
+        if cycle_idx < 20 or cycle_idx % 10 == 0:
+            if not peak_data:
+                logging.warning(f"[PEAK_DATA_EMPTY] Cycle {cycle_idx}: peak_data is EMPTY after building from gauss_idxs! gauss_idxs={gauss_idxs}, fitting_success={fitting_success if 'fitting_success' in locals() else 'N/A'}, valid_components={valid_components if 'valid_components' in locals() else 'N/A'}")
+        
+        # Debug: Always log peak_data status (sample every 50 cycles)
+        if cycle_idx % 50 == 0 or cycle_idx < 10:
+            logging.info(f"[PEAK_DATA] Cycle {cycle_idx}: After building from gauss_idxs - peak_data keys={list(peak_data.keys())}, gauss_idxs keys={list(gauss_idxs.keys()) if gauss_idxs else 'None'}")
+            if "R" in peak_data:
+                r_data = peak_data['R']
+                logging.info(f"[PEAK_DATA] Cycle {cycle_idx}: R in peak_data - center_idx={r_data.get('center_idx')}, global={r_data.get('global_center_idx')}")
+            else:
+                logging.warning(f"[PEAK_DATA] Cycle {cycle_idx}: R NOT in peak_data after building from gauss_idxs!")
+        
         if verbose:
             print(f"[Cycle {cycle_idx}]: DEBUG - After building peak_data: 'P' in peak_data={('P' in peak_data)}, peak_data.get('P')={peak_data.get('P')}")
         
@@ -1519,6 +1835,39 @@ def process_cycle(
                 
                 if verbose:
                     print(f"[Cycle {cycle_idx}]: DEBUG - Added P to peak_data (not in Gaussian fit): center_idx={p_center_idx_rel}, global={p_global_center_idx}")
+        
+        # Ensure R is always in peak_data (critical - R should always be detected)
+        if "R" not in peak_data:
+            if r_center_idx is not None and r_height is not None:
+                # R peak was detected but not in Gaussian fit - add it to peak_data
+                r_center_idx_rel = r_center_idx  # Already cycle-relative
+                r_global_center_idx = (
+                    int(xs_samples[r_center_idx_rel])
+                    if r_center_idx_rel is not None and r_center_idx_rel < len(xs_samples)
+                    else None
+                )
+                
+                if r_global_center_idx is not None:
+                    peak_data["R"] = {
+                        "global_center_idx": r_global_center_idx,
+                        "center_idx": r_center_idx_rel,
+                        "gauss_center": None,  # Not in Gaussian fit
+                        "gauss_height": float(r_height),
+                        "gauss_stdev_samples": None,
+                        "gauss_fwhm_samples": None,
+                        "gauss_stdev_ms": None,
+                        "gauss_fwhm_ms": None,
+                    }
+                    if cycle_idx % 50 == 0 or cycle_idx < 10:
+                        logging.info(f"[R_FALLBACK] Cycle {cycle_idx}: Added R to peak_data (not in Gaussian fit): center_idx={r_center_idx_rel}, global={r_global_center_idx}")
+                    if verbose:
+                        print(f"[Cycle {cycle_idx}]: DEBUG - Added R to peak_data (not in Gaussian fit): center_idx={r_center_idx_rel}, global={r_global_center_idx}")
+                else:
+                    if cycle_idx % 50 == 0 or cycle_idx < 10:
+                        logging.error(f"[R_FALLBACK] Cycle {cycle_idx}: Failed to compute r_global_center_idx - r_center_idx_rel={r_center_idx_rel}, len(xs_samples)={len(xs_samples)}")
+            else:
+                if cycle_idx % 50 == 0 or cycle_idx < 10:
+                    logging.error(f"[R_FALLBACK] Cycle {cycle_idx}: Cannot add R to peak_data - r_center_idx={r_center_idx}, r_height={r_height}")
         
         # Add precomputed T/P waves to peak_data if they weren't in Gaussian fit
         # Also preserve precomputed onset/offset indices if available
@@ -1587,6 +1936,17 @@ def process_cycle(
     #########################################################################################################
 
     if "peak_data" not in locals() or not peak_data:
+        # CRITICAL: If peak_data is missing, we still need to assign R peak to output_dict!
+        # R peak should always be detected, so add it even if peak_data is missing
+        if r_center_idx is not None and r_height is not None:
+            r_global_center_idx = (
+                int(xs_samples[r_center_idx]) if r_center_idx is not None and r_center_idx < len(xs_samples) else None
+            )
+            if r_global_center_idx is not None:
+                output_dict["R_global_center_idx"][cycle_idx] = r_global_center_idx
+                if cycle_idx < 20 or cycle_idx % 10 == 0:
+                    logging.warning(f"[EARLY_RETURN] Cycle {cycle_idx}: peak_data missing but assigned R={r_global_center_idx} before early return")
+        
         if verbose:
             print(f"[Cycle {cycle_idx}]: peak_data missing or empty — skipping shape feature extraction.")
         return output_dict, previous_r_global_center_idx, previous_p_global_center_idx, sig_detrended, None
@@ -1596,36 +1956,106 @@ def process_cycle(
     # ==============================================================================
     # Compute QRS boundaries using derivative-based method BEFORE shape extraction
     # so that shape features use the accurate boundaries
+    # CRITICAL: Compute QRS boundaries even if Q or S peaks are not detected,
+    # as P and T wave detection depends on these boundaries
     if r_center_idx is not None:
         # Update QRS onset (Q left edge) using derivative-based method
-        if "Q" in peak_data and q_center_idx is not None:
-            qrs_onset_detected = detect_qrs_onset_derivative(
-                signal=sig_detrended,
-                q_peak_idx=q_center_idx,
-                r_peak_idx=r_center_idx,
-                sampling_rate=sampling_rate,
-                search_window_ms=100.0,
-                verbose=verbose,
-                cycle_idx=cycle_idx,
-            )
-            peak_data["Q"]["le_idx"] = float(qrs_onset_detected)
-            if verbose:
-                print(f"[Cycle {cycle_idx}]: Pre-computed Q le_idx (QRS onset) = {qrs_onset_detected} (derivative-based)")
+        # Use Q peak if available, otherwise search from R peak
+        qrs_onset_detected = None
+        try:
+            if "Q" in peak_data and q_center_idx is not None:
+                qrs_onset_detected = detect_qrs_onset_derivative(
+                    signal=sig_detrended,
+                    q_peak_idx=q_center_idx,
+                    r_peak_idx=r_center_idx,
+                    sampling_rate=sampling_rate,
+                    search_window_ms=100.0,
+                    verbose=verbose,
+                    cycle_idx=cycle_idx,
+                )
+                peak_data["Q"]["le_idx"] = float(qrs_onset_detected)
+                if verbose:
+                    print(f"[Cycle {cycle_idx}]: Pre-computed Q le_idx (QRS onset) = {qrs_onset_detected} (derivative-based, Q peak available)")
+            else:
+                # Q peak not detected, but we still need QRS onset for P wave detection
+                # Search from R peak backwards
+                qrs_onset_detected = detect_qrs_onset_derivative(
+                    signal=sig_detrended,
+                    q_peak_idx=None,  # No Q peak, search from R
+                    r_peak_idx=r_center_idx,
+                    sampling_rate=sampling_rate,
+                    search_window_ms=100.0,
+                    verbose=verbose,
+                    cycle_idx=cycle_idx,
+                )
+                # Store in peak_data even if Q is not detected
+                if "Q" not in peak_data:
+                    peak_data["Q"] = {}
+                peak_data["Q"]["le_idx"] = float(qrs_onset_detected)
+                if verbose:
+                    print(f"[Cycle {cycle_idx}]: Pre-computed Q le_idx (QRS onset) = {qrs_onset_detected} (derivative-based, Q peak NOT available)")
+        except Exception as e:
+            if cycle_idx < 20 or cycle_idx % 10 == 0:
+                logging.error(f"[QRS_ONSET_ERROR] Cycle {cycle_idx}: Exception in QRS onset detection: {e}")
+                import traceback
+                logging.error(traceback.format_exc())
+            # Fallback: use fixed offset
+            if qrs_onset_detected is None and r_center_idx is not None:
+                qrs_onset_detected = max(0, r_center_idx - int(round(40 * sampling_rate / 1000.0)))
+                if "Q" not in peak_data:
+                    peak_data["Q"] = {}
+                peak_data["Q"]["le_idx"] = float(qrs_onset_detected)
+                if cycle_idx < 20 or cycle_idx % 10 == 0:
+                    logging.warning(f"[QRS_ONSET_FALLBACK] Cycle {cycle_idx}: Using fallback QRS onset = {qrs_onset_detected}")
         
         # Update QRS end (S right edge) using derivative-based method
-        if "S" in peak_data and s_center_idx is not None:
-            qrs_end_detected = detect_qrs_end_derivative(
-                signal=sig_detrended,
-                s_peak_idx=s_center_idx,
-                r_peak_idx=r_center_idx,
-                sampling_rate=sampling_rate,
-                search_window_ms=100.0,
-                verbose=verbose,
-                cycle_idx=cycle_idx,
-            )
-            peak_data["S"]["ri_idx"] = float(qrs_end_detected)
-            if verbose:
-                print(f"[Cycle {cycle_idx}]: Pre-computed S ri_idx (QRS end) = {qrs_end_detected} (derivative-based)")
+        # Use S peak if available, otherwise search from R peak
+        qrs_end_detected = None
+        try:
+            if "S" in peak_data and s_center_idx is not None:
+                qrs_end_detected = detect_qrs_end_derivative(
+                    signal=sig_detrended,
+                    s_peak_idx=s_center_idx,
+                    r_peak_idx=r_center_idx,
+                    sampling_rate=sampling_rate,
+                    search_window_ms=100.0,
+                    verbose=verbose,
+                    cycle_idx=cycle_idx,
+                )
+                peak_data["S"]["ri_idx"] = float(qrs_end_detected)
+                if verbose:
+                    print(f"[Cycle {cycle_idx}]: Pre-computed S ri_idx (QRS end) = {qrs_end_detected} (derivative-based, S peak available)")
+            else:
+                # S peak not detected, but we still need QRS end for T wave detection
+                # Search from R peak forwards
+                qrs_end_detected = detect_qrs_end_derivative(
+                    signal=sig_detrended,
+                    s_peak_idx=None,  # No S peak, search from R
+                    r_peak_idx=r_center_idx,
+                    sampling_rate=sampling_rate,
+                    search_window_ms=100.0,
+                    verbose=verbose,
+                    cycle_idx=cycle_idx,
+                )
+                # Store in peak_data even if S is not detected
+                if "S" not in peak_data:
+                    peak_data["S"] = {}
+                peak_data["S"]["ri_idx"] = float(qrs_end_detected)
+                if verbose:
+                    print(f"[Cycle {cycle_idx}]: Pre-computed S ri_idx (QRS end) = {qrs_end_detected} (derivative-based, S peak NOT available)")
+        except Exception as e:
+            if cycle_idx < 20 or cycle_idx % 10 == 0:
+                logging.error(f"[QRS_END_ERROR] Cycle {cycle_idx}: Exception in QRS end detection: {e}")
+                import traceback
+                logging.error(traceback.format_exc())
+            # Fallback: use fixed offset
+            if qrs_end_detected is None and r_center_idx is not None:
+                qrs_end_detected = min(len(sig_detrended) - 1, r_center_idx + int(round(40 * sampling_rate / 1000.0)))
+                if "S" not in peak_data:
+                    peak_data["S"] = {}
+                peak_data["S"]["ri_idx"] = float(qrs_end_detected)
+                if cycle_idx < 20 or cycle_idx % 10 == 0:
+                    logging.warning(f"[QRS_END_FALLBACK] Cycle {cycle_idx}: Using fallback QRS end = {qrs_end_detected}")
 
     # ==============================================================================
     # EXTRACT SHAPE FEATURES
@@ -1633,7 +2063,17 @@ def process_cycle(
     component_labels = list(peak_data.keys())
 
     def extract_feature_array(peak_data, component_labels, key):
-        return np.array([peak_data[comp][key] for comp in component_labels])
+        """Extract feature array with proper type conversion to handle non-numeric values."""
+        values = []
+        for comp in component_labels:
+            val = peak_data[comp].get(key, np.nan)
+            # Convert to float, handling None, strings, and other non-numeric types
+            try:
+                val_float = float(val) if val is not None and not isinstance(val, str) else np.nan
+            except (ValueError, TypeError):
+                val_float = np.nan
+            values.append(val_float)
+        return np.array(values, dtype=float)
 
     gauss_center = extract_feature_array(peak_data, component_labels, "gauss_center")
     gauss_height = extract_feature_array(peak_data, component_labels, "gauss_height")
@@ -1746,6 +2186,13 @@ def process_cycle(
     # ==============================================================================
     # STORE VALS
     # ==============================================================================
+    # CRITICAL: Ensure Q and S are in peak_data even if peaks weren't detected,
+    # so that QRS boundaries (le_idx for Q, ri_idx for S) are stored in output_dict
+    # This is essential for P and T wave detection which depend on QRS boundaries
+    if "Q" not in peak_data:
+        peak_data["Q"] = {}
+    if "S" not in peak_data:
+        peak_data["S"] = {}
 
     for comp in peak_data.keys():
         center_idx = peak_data[comp].get("center_idx", np.nan)
@@ -1918,6 +2365,16 @@ def process_cycle(
     r_center_idx = peak_data.get("R", {}).get("center_idx")
     p_center_idx = peak_data.get("P", {}).get("center_idx")
     
+    # Debug: Always log if R is missing (critical issue)
+    if r_center_idx is None:
+        # Log every missing R, not just sampled cycles
+        if cycle_idx < 20 or cycle_idx % 10 == 0:  # More frequent logging for missing R
+            logging.warning(f"[OUTPUT_ASSIGN] Cycle {cycle_idx}: r_center_idx is None! peak_data keys={list(peak_data.keys())}, peak_data.get('R')={peak_data.get('R')}")
+    
+    # Debug: Always log peak_data status for first few cycles (regardless of verbose)
+    if cycle_idx < 3:
+        logging.debug(f"[processcycle.py] Cycle {cycle_idx}: peak_data keys={list(peak_data.keys())}, R_center_idx={r_center_idx}, P_center_idx={p_center_idx}")
+    
     if verbose:
         print(f"[Cycle {cycle_idx}]: DEBUG - Before output_dict assignment: p_center_idx={p_center_idx}, 'P' in peak_data={('P' in peak_data)}")
 
@@ -1931,9 +2388,16 @@ def process_cycle(
     if verbose:
         print(f"[Cycle {cycle_idx}]: DEBUG - After computing global indices: p_global_center_idx={p_global_center_idx}")
 
-    # Assign values
+    # Assign values - THIS MUST ALWAYS RUN REGARDLESS OF VERBOSE
     for comp, val in zip(["R_global_center_idx", "P_global_center_idx"], [r_global_center_idx, p_global_center_idx]):
         output_dict[comp][cycle_idx] = val
+        # Debug: Log assignment (sample every 50 cycles, always for R)
+        if comp == "R_global_center_idx" and (cycle_idx % 50 == 0 or cycle_idx < 10):
+            logging.info(f"[OUTPUT_ASSIGN] Cycle {cycle_idx}: Assigned R_global_center_idx[{cycle_idx}] = {val}")
+            if val is None:
+                logging.error(f"[OUTPUT_ASSIGN] Cycle {cycle_idx}: R_global_center_idx is None! r_center_idx={r_center_idx}, xs_samples len={len(xs_samples)}")
+        if cycle_idx < 3 and comp == "P_global_center_idx":
+            logging.debug(f"[OUTPUT_ASSIGN] Assigned {comp}[{cycle_idx}] = {val}")
         if verbose and comp == "P_global_center_idx":
             print(f"[Cycle {cycle_idx}]: DEBUG - Assigned to output_dict['P_global_center_idx'][{cycle_idx}] = {val}")
 

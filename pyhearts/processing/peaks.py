@@ -235,6 +235,10 @@ def find_peaks(
     if mode not in {"min", "max"}:
         raise ValueError("mode must be 'min' or 'max'")
 
+    # Validate search window - handle None values
+    if start_idx is None or end_idx is None:
+        return None, None, None
+    
     # Validate search window
     if (
         start_idx >= end_idx

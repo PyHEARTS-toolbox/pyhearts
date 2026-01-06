@@ -911,24 +911,34 @@ def extract_shape_features(
     bounds_by_wave: Dict[str, Tuple[int, int]] = {}
 
     for i, label in enumerate(component_labels):
-        center = gauss_centers[i]
-        height = gauss_heights[i]
-        stdev  = gauss_stdevs[i]
+        # Ensure values are numeric before checking isfinite
+        try:
+            center = float(gauss_centers[i]) if gauss_centers[i] is not None else np.nan
+            height = float(gauss_heights[i]) if gauss_heights[i] is not None else np.nan
+            stdev = float(gauss_stdevs[i]) if gauss_stdevs[i] is not None else np.nan
+        except (ValueError, TypeError, IndexError):
+            # Skip if conversion fails or index out of range
+            continue
+        
+        # Check if all values are finite
         if not (np.isfinite(center) and np.isfinite(height) and np.isfinite(stdev)):
             continue
 
         approx_center_idx = int(round(center))
+        # Ensure center index is within bounds
+        approx_center_idx = max(0, min(len(signal) - 1, approx_center_idx))
         
         # Use precomputed boundaries if available (for Q and S with derivative-based QRS boundaries)
         if precomputed_bounds is not None and label in precomputed_bounds:
             precomputed = precomputed_bounds[label]
             if label == "Q":
                 # For Q: precomputed is (left, center) - compute right boundary
-                left_idx = precomputed[0]
+                left_idx = max(0, min(len(signal) - 1, int(precomputed[0])))
+                center_for_bounds = max(0, min(len(signal) - 1, int(precomputed[1])))
                 # Compute right boundary using standard method
                 _, right_idx = find_asymmetric_bounds_stdguided(
                     sig=signal,
-                    center_idx=precomputed[1],
+                    center_idx=center_for_bounds,
                     height=height,
                     std=stdev,
                     sampling_rate=sampling_rate,
@@ -936,14 +946,15 @@ def extract_shape_features(
                     cfg=cfg,
                 )
                 # But only use the right boundary, keep the precomputed left
-                right_idx = min(len(signal) - 1, right_idx)
+                right_idx = max(left_idx + 1, min(len(signal) - 1, right_idx))
             elif label == "S":
                 # For S: precomputed is (center, right) - compute left boundary
-                right_idx = precomputed[1]
+                right_idx = max(0, min(len(signal) - 1, int(precomputed[1])))
+                center_for_bounds = max(0, min(len(signal) - 1, int(precomputed[0])))
                 # Compute left boundary using standard method
                 left_idx, _ = find_asymmetric_bounds_stdguided(
                     sig=signal,
-                    center_idx=precomputed[0],
+                    center_idx=center_for_bounds,
                     height=height,
                     std=stdev,
                     sampling_rate=sampling_rate,
@@ -951,7 +962,7 @@ def extract_shape_features(
                     cfg=cfg,
                 )
                 # But only use the left boundary, keep the precomputed right
-                left_idx = max(0, left_idx)
+                left_idx = max(0, min(right_idx - 1, left_idx))
             else:
                 # Shouldn't happen, but fallback to standard method
                 left_idx, right_idx = find_asymmetric_bounds_stdguided(
@@ -984,10 +995,15 @@ def extract_shape_features(
 
         # refine center for Q/S as trough
         if label in {"Q", "S"}:
+            # Ensure indices are valid before slicing
+            if left_idx >= len(signal) or right_idx >= len(signal) or left_idx < 0 or right_idx < 0:
+                continue
             segment = signal[left_idx:right_idx+1]
             if segment.size == 0:
                 continue
             center_idx = left_idx + int(np.argmin(segment))
+            # Ensure center_idx is within bounds
+            center_idx = max(0, min(len(signal) - 1, center_idx))
         else:
             center_idx = approx_center_idx
 

@@ -1,9 +1,0 @@
-T-Peak Detection Results: Full-Signal Filtering
-================================================================================
-
-Total beats analyzed: 307
-T peaks detected: 307/307 (100.0%)
-
-Mean MAD: 66.07 ms
-Median MAD: 60.00 ms
-% within ±20ms: 34.5%

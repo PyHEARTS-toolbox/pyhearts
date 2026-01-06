@@ -1,9 +1,0 @@
-T-Peak Detection Results: S Wave End + 20ms Adjustment
-================================================================================
-
-Total beats analyzed: 300
-T peaks detected: 298/300 (99.3%)
-
-Mean MAD: 36.28 ms
-Median MAD: 24.00 ms
-% within ±20ms: 48.3%

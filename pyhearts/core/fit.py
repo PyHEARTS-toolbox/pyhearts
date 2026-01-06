@@ -575,20 +575,13 @@ class PyHEARTS:
             
             for cycle_idx, cycle_label in enumerate(cycles):
                 one_cycle = epochs_df.loc[epochs_df["cycle"] == cycle_label]
-                if self.verbose and (cycle_idx == 5 or cycle_label == 5):  # Debug cycle 5 specifically (by index or label)
-                    print(f"[fit.py] DEBUG - Creating one_cycle:")
-                    print(f"  cycle_idx (0-based position in cycles list): {cycle_idx}")
-                    print(f"  cycle_label (actual cycle number in epochs_df): {cycle_label}")
-                    print(f"  one_cycle len: {len(one_cycle)}")
-                    if len(one_cycle) > 0 and 'index' in one_cycle.columns:
-                        print(f"  one_cycle['index'].iloc[0]: {one_cycle['index'].iloc[0]}")
-                        print(f"  one_cycle['index'].iloc[-1]: {one_cycle['index'].iloc[-1]}")
-                    if 'cycle' in one_cycle.columns:
-                        print(f"  one_cycle['cycle'].unique(): {one_cycle['cycle'].unique()}")
-                    # Check what cycle 5 (by label) would be
-                    cycle_5_by_label = epochs_df.loc[epochs_df["cycle"] == 5]
-                    if len(cycle_5_by_label) > 0 and 'index' in cycle_5_by_label.columns:
-                        print(f"  Cycle 5 (by label) would start at: {cycle_5_by_label['index'].iloc[0]}")
+                
+                # Debug: Track cycle processing (first 3 cycles only to avoid spam)
+                if cycle_idx < 3:
+                    logging.debug(f"[fit.py] Processing cycle {cycle_idx} (label {cycle_label}), verbose={self.verbose}")
+                    if len(one_cycle) == 0:
+                        logging.warning(f"[fit.py] Cycle {cycle_idx} is empty!")
+                
                 try:
                     self.process_cycle_wrapper(
                         one_cycle, cycle_idx, 
@@ -597,12 +590,37 @@ class PyHEARTS:
                         p_training_signal_peak=p_training_signal_peak,
                         p_training_noise_peak=p_training_noise_peak,
                     )
+                    
+                    # Debug: Check if peaks were stored after processing (first 3 cycles)
+                    if cycle_idx < 3 and self.output_dict is not None:
+                        r_val = self.output_dict.get("R_global_center_idx", [None])[cycle_idx] if cycle_idx < len(self.output_dict.get("R_global_center_idx", [])) else None
+                        p_val = self.output_dict.get("P_global_center_idx", [None])[cycle_idx] if cycle_idx < len(self.output_dict.get("P_global_center_idx", [])) else None
+                        logging.debug(f"[fit.py] After cycle {cycle_idx}: R={r_val}, P={p_val}")
+                        
                 except Exception as e:
-                    logging.error(f"Error processing cycle {cycle_idx}: {e}")
+                    # Always log errors, regardless of verbose setting
+                    logging.error(f"[CYCLE_ERROR] Error processing cycle {cycle_idx}: {e}")
+                    import traceback
+                    logging.error(f"[CYCLE_ERROR] Cycle {cycle_idx} traceback:\n{traceback.format_exc()}")
+                    # Continue processing other cycles even if one fails
                     continue
 
+            # Debug: Check R peaks in output_dict before DataFrame conversion
+            if "R_global_center_idx" in self.output_dict:
+                r_dict_values = np.array(self.output_dict["R_global_center_idx"])
+                r_non_null = np.sum(~pd.isna(r_dict_values))
+                logging.info(f"[FIT_DEBUG] Before DataFrame conversion: R_global_center_idx - total={len(r_dict_values)}, non-null={r_non_null}")
+                if r_non_null > 0:
+                    r_non_null_indices = np.where(~pd.isna(r_dict_values))[0]
+                    logging.info(f"[FIT_DEBUG] Cycles with R peaks: {r_non_null_indices[:20]}... (first 20 of {len(r_non_null_indices)})")
+            
             self.output_df = pd.DataFrame.from_dict(self.output_dict, orient="columns")
             self.output_df.index.name = "cycle_index"
+            
+            # Debug: Check R peaks after DataFrame conversion
+            if "R_global_center_idx" in self.output_df.columns:
+                r_df_non_null = self.output_df["R_global_center_idx"].notna().sum()
+                logging.info(f"[FIT_DEBUG] After DataFrame conversion: R_global_center_idx - non-null in df={r_df_non_null}, total rows={len(self.output_df)}")
             
             # Debug: Check P values after DataFrame conversion
             if self.verbose and "P_global_center_idx" in self.output_dict:
@@ -610,7 +628,7 @@ class PyHEARTS:
                 p_df_values = self.output_df["P_global_center_idx"].head(5).values if "P_global_center_idx" in self.output_df.columns else None
                 print(f"[DEBUG] After DataFrame conversion: dict values={p_dict_values}, df values={p_df_values}")
     
-            return self.output_df, self.epochs_df #output_df, epochs_df = analyzer.analyze_ecg(signal) return both for acessible unpacking
+            return self.output_df, self.epochs_df #output_df, epochs_df = analyzer.analyze_ecg(signal) return both for accessible unpacking
 
         
         except Exception as e:

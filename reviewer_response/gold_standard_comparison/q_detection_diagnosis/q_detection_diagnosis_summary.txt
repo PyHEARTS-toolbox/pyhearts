@@ -1,8 +1,0 @@
-Q Detection Diagnosis Summary
-================================================================================
-
-Total beats analyzed: 262
-Q peaks detected: 145/262 (55.3%)
-
-Q-to-R ratio (detected): 0.312
-Q-to-R ratio (NOT detected): 0.830

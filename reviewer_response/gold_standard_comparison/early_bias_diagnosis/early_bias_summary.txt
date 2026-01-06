@@ -1,7 +1,0 @@
-T-Peak Early Bias Diagnosis Summary
-================================================================================
-
-Total beats: 255
-Mean error: -2.73 ms
-Signal apex error: -4.41 ms
-Best zero-crossing error: -2.85 ms
