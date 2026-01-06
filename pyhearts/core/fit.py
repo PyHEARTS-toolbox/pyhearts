@@ -575,6 +575,20 @@ class PyHEARTS:
             
             for cycle_idx, cycle_label in enumerate(cycles):
                 one_cycle = epochs_df.loc[epochs_df["cycle"] == cycle_label]
+                if self.verbose and (cycle_idx == 5 or cycle_label == 5):  # Debug cycle 5 specifically (by index or label)
+                    print(f"[fit.py] DEBUG - Creating one_cycle:")
+                    print(f"  cycle_idx (0-based position in cycles list): {cycle_idx}")
+                    print(f"  cycle_label (actual cycle number in epochs_df): {cycle_label}")
+                    print(f"  one_cycle len: {len(one_cycle)}")
+                    if len(one_cycle) > 0 and 'index' in one_cycle.columns:
+                        print(f"  one_cycle['index'].iloc[0]: {one_cycle['index'].iloc[0]}")
+                        print(f"  one_cycle['index'].iloc[-1]: {one_cycle['index'].iloc[-1]}")
+                    if 'cycle' in one_cycle.columns:
+                        print(f"  one_cycle['cycle'].unique(): {one_cycle['cycle'].unique()}")
+                    # Check what cycle 5 (by label) would be
+                    cycle_5_by_label = epochs_df.loc[epochs_df["cycle"] == 5]
+                    if len(cycle_5_by_label) > 0 and 'index' in cycle_5_by_label.columns:
+                        print(f"  Cycle 5 (by label) would start at: {cycle_5_by_label['index'].iloc[0]}")
                 try:
                     self.process_cycle_wrapper(
                         one_cycle, cycle_idx, 
@@ -589,6 +603,12 @@ class PyHEARTS:
 
             self.output_df = pd.DataFrame.from_dict(self.output_dict, orient="columns")
             self.output_df.index.name = "cycle_index"
+            
+            # Debug: Check P values after DataFrame conversion
+            if self.verbose and "P_global_center_idx" in self.output_dict:
+                p_dict_values = self.output_dict["P_global_center_idx"][:min(5, len(self.output_dict["P_global_center_idx"]))]
+                p_df_values = self.output_df["P_global_center_idx"].head(5).values if "P_global_center_idx" in self.output_df.columns else None
+                print(f"[DEBUG] After DataFrame conversion: dict values={p_dict_values}, df values={p_df_values}")
     
             return self.output_df, self.epochs_df #output_df, epochs_df = analyzer.analyze_ecg(signal) return both for acessible unpacking
 

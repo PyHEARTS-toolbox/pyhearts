@@ -979,9 +979,17 @@ def _detect_r_peaks_derivative_based(
     # Convert prominence threshold to slope threshold
     # Training phase gives prominence, but we need slope threshold
     # Use a multiplier to convert: slope threshold ≈ prominence * multiplier
-    # For now, use a reasonable fraction of max slope
+    # Balance: need to catch missed peaks but avoid false positives
     max_slope = float(np.max(abs_derivative))
-    slope_threshold = max_slope * 0.1  # 10% of max slope as initial threshold
+    # Apply sensitivity adjustment to slope threshold
+    # Balance: catch missed peaks but avoid false positives
+    sensitivity_factors = {
+        "standard": 0.06,  # 6% of max slope (balanced - slight increase from 5% to reduce false positives)
+        "high": 0.04,      # 4% of max slope (more sensitive)
+        "maximum": 0.03,   # 3% of max slope (most sensitive)
+    }
+    slope_factor = sensitivity_factors.get(sensitivity, 0.06)
+    slope_threshold = max_slope * slope_factor
     
     # Apply minimum distance (refractory period) filtering
     distance_samples = max(1, int(round(cfg.rpeak_min_refrac_ms * sampling_rate / 1000.0)))
@@ -1111,26 +1119,93 @@ def _detect_r_peaks_derivative_based(
             
             filtered_peaks = np.array(filtered_peaks, dtype=int)
     
-    # QRS characteristic filtering: reject T-waves and P-waves by slope
+    # QRS characteristic filtering: reject T-waves and P-waves by slope and amplitude
     if len(filtered_peaks) > 0:
         peak_slopes = []
+        peak_amplitudes = []
         for peak_idx in filtered_peaks:
             slope = _calculate_maximum_slope(derivative, peak_idx, sampling_rate)
             peak_slopes.append(slope)
+            peak_amplitudes.append(np.abs(ecg_filtered[peak_idx]))
         peak_slopes = np.array(peak_slopes)
+        peak_amplitudes = np.array(peak_amplitudes)
         
         if len(peak_slopes) >= 2:
             sorted_slopes = np.sort(peak_slopes)
             median_qrs_slope = np.median(sorted_slopes[len(sorted_slopes)//2:])
             slope_threshold_qrs = 0.75 * median_qrs_slope
+            
+            # Also filter by amplitude: reject peaks with very low amplitude (likely noise)
+            sorted_amplitudes = np.sort(peak_amplitudes)
+            median_qrs_amplitude = np.median(sorted_amplitudes[len(sorted_amplitudes)//2:])
+            amplitude_threshold_qrs = 0.35 * median_qrs_amplitude  # Keep peaks >= 35% of median (slightly more lenient)
         else:
             median_qrs_slope = float(np.median(peak_slopes)) if len(peak_slopes) > 0 else 0.1
             slope_threshold_qrs = 0.5 * median_qrs_slope
+            median_qrs_amplitude = float(np.median(peak_amplitudes)) if len(peak_amplitudes) > 0 else 0.1
+            amplitude_threshold_qrs = 0.3 * median_qrs_amplitude
         
+        # Apply both slope and amplitude filters
         slope_mask_qrs = peak_slopes >= slope_threshold_qrs
-        filtered_peaks = filtered_peaks[slope_mask_qrs]
+        amplitude_mask_qrs = peak_amplitudes >= amplitude_threshold_qrs
+        combined_mask = slope_mask_qrs & amplitude_mask_qrs
+        filtered_peaks = filtered_peaks[combined_mask]
     
-    # Final RR interval validation
+    # Gap-filling: search for missed peaks in large RR gaps (more conservative)
+    if len(filtered_peaks) >= 2:
+        rr_intervals = np.diff(filtered_peaks)
+        if len(rr_intervals) > 0:
+            median_rr = float(np.median(rr_intervals))
+            # Only fill very large gaps (1.7x median - balanced)
+            gap_threshold = 1.7 * median_rr
+            
+            additional_peaks = []
+            for i in range(len(rr_intervals)):
+                if rr_intervals[i] > gap_threshold:
+                    # Large gap detected - search for missed peak
+                    gap_start = filtered_peaks[i]
+                    gap_end = filtered_peaks[i + 1]
+                    gap_segment = abs_derivative[gap_start:gap_end]
+                    gap_signal_segment = ecg_filtered[gap_start:gap_end]
+                    
+                    if len(gap_segment) > 10:
+                        # Use moderate threshold for gap-filling (0.6x - balanced)
+                        gap_slope_threshold = slope_threshold * 0.6
+                        gap_peaks, gap_props = find_peaks(
+                            gap_segment,
+                            distance=max(1, int(0.3 * median_rr)),
+                            prominence=gap_slope_threshold
+                        )
+                        
+                        # Additional validation: check signal amplitude
+                        # R peaks should have significant amplitude
+                        if len(gap_peaks) > 0:
+                            signal_amplitudes = np.abs(gap_signal_segment[gap_peaks])
+                            median_amplitude = float(np.median(signal_amplitudes)) if len(signal_amplitudes) > 0 else 0.0
+                            # Only keep peaks with amplitude >= 50% of median (reject noise)
+                            amplitude_threshold = median_amplitude * 0.5
+                            
+                            for gap_peak in gap_peaks:
+                                if np.abs(gap_signal_segment[gap_peak]) >= amplitude_threshold:
+                                    signal_peak_idx = gap_start + gap_peak
+                                    if 0 <= signal_peak_idx < len(ecg_filtered):
+                                        additional_peaks.append(signal_peak_idx)
+            
+            if additional_peaks:
+                # Merge and sort
+                all_peaks = np.concatenate([filtered_peaks, np.array(additional_peaks)])
+                all_peaks = np.unique(all_peaks)
+                all_peaks = np.sort(all_peaks)
+                
+                # Re-apply distance filtering
+                distance_samples = max(1, int(round(cfg.rpeak_min_refrac_ms * sampling_rate / 1000.0)))
+                filtered_peaks = [all_peaks[0]]
+                for peak_idx in all_peaks[1:]:
+                    if peak_idx - filtered_peaks[-1] >= distance_samples:
+                        filtered_peaks.append(peak_idx)
+                filtered_peaks = np.array(filtered_peaks, dtype=int)
+    
+    # Final RR interval validation (balanced approach)
     if len(filtered_peaks) >= 2:
         min_physiological_rr = 0.2 * sampling_rate  # 200ms minimum
         valid_peaks = [filtered_peaks[0]]
@@ -1141,7 +1216,18 @@ def _detect_r_peaks_derivative_based(
                 min_bpm, max_bpm = cfg.rpeak_bpm_bounds
                 min_rr_samples = (60_000.0 / max_bpm) * sampling_rate / 1000.0
                 max_rr_samples = (60_000.0 / min_bpm) * sampling_rate / 1000.0
+                # Check both bounds but allow some flexibility
+                # Reject if clearly out of physiological range
                 if min_rr_samples <= prev_rr <= max_rr_samples:
+                    valid_peaks.append(filtered_peaks[i])
+                elif prev_rr < min_rr_samples:
+                    # Very short RR - likely false positive, reject
+                    continue
+                elif prev_rr > max_rr_samples * 1.5:
+                    # Very long RR - likely missed peak or artifact, reject
+                    continue
+                else:
+                    # Slightly out of bounds but close - keep (might be valid variation)
                     valid_peaks.append(filtered_peaks[i])
         
         filtered_peaks = np.array(valid_peaks, dtype=int)

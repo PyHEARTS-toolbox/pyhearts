@@ -200,6 +200,10 @@ dev/
 ecgpuwave-*/
 qtdb_full_ecgpuwave_results/
 
+# QTDB results subdirectories (analysis outputs)
+qtdb_results/*/
+!qtdb_results/ecgpuwave_results_pw/
+
 # Development/utility scripts (not part of the toolbox)
 process_qtdb_full.py
 verify_installation.py
@@ -215,6 +219,12 @@ regenerate_*.py
 run_*.py
 test_original_*.py
 test_sel*.py
+test_ecgpuwave_*.py
+test_improved_*.py
+test_p_detection_*.py
+test_p_t_detection_*.py
+test_qrs_*.py
+validate_*.py
 visualize_*.py
 
 # Example/integration files (not part of the toolbox)
@@ -223,4 +233,33 @@ pyhearts/processing/adaptive_threshold_integration_example.py
 # Analysis/documentation directories (non-toolbox)
 p_peak_analysis/
 reviewer_response/
+qtdb_*/
+
+# Additional analysis/validation markdown files
+R_S_SAME_INDEX*.md
+QRS_ONSET*.md
+BEAT_BY_BEAT*.md
+CYCLE5*.md
+DERMAX*.md
+NOISE_CHECK*.md
+OUTER_LOOP*.md
+P_PEAK*.md
+VALIDATION*.md
+COMPREHENSIVE*.md
+ECGPUWAVE*.md
+FIXES_APPLIED*.md
+ROOT_CAUSE*.md
+analyze_ecgpuwave*.md
+
+# Additional utility/analysis scripts
+capture_*.py
+full_assessment_*.py
+in_depth_*.py
+
+# Processing module development files (non-toolbox - experimental/alternative implementations)
+pyhearts/processing/p_wave_detection_*.py
+pyhearts/processing/qrs_boundary_detection.py
+
+# Verification/utility scripts
+verify_*.py
 

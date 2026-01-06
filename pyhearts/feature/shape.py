@@ -860,6 +860,7 @@ def extract_shape_features(
     *,
     cfg: Optional[ProcessCycleConfig] = None,
     verbose: bool = False,
+    precomputed_bounds: Optional[Dict[str, Tuple[int, int]]] = None,
 ) -> Dict[str, Any]:
     """
     Extract morphological shape features for labeled ECG components.
@@ -917,17 +918,67 @@ def extract_shape_features(
             continue
 
         approx_center_idx = int(round(center))
-        left_idx, right_idx = find_asymmetric_bounds_stdguided(
-            sig=signal,
-            center_idx=approx_center_idx,
-            height=height,
-            std=stdev,
-            sampling_rate=sampling_rate,
-            comp_label=label,
-            cfg=cfg,
-        )
-        left_idx = max(0, left_idx)
-        right_idx = min(len(signal) - 1, right_idx)
+        
+        # Use precomputed boundaries if available (for Q and S with derivative-based QRS boundaries)
+        if precomputed_bounds is not None and label in precomputed_bounds:
+            precomputed = precomputed_bounds[label]
+            if label == "Q":
+                # For Q: precomputed is (left, center) - compute right boundary
+                left_idx = precomputed[0]
+                # Compute right boundary using standard method
+                _, right_idx = find_asymmetric_bounds_stdguided(
+                    sig=signal,
+                    center_idx=precomputed[1],
+                    height=height,
+                    std=stdev,
+                    sampling_rate=sampling_rate,
+                    comp_label=label,
+                    cfg=cfg,
+                )
+                # But only use the right boundary, keep the precomputed left
+                right_idx = min(len(signal) - 1, right_idx)
+            elif label == "S":
+                # For S: precomputed is (center, right) - compute left boundary
+                right_idx = precomputed[1]
+                # Compute left boundary using standard method
+                left_idx, _ = find_asymmetric_bounds_stdguided(
+                    sig=signal,
+                    center_idx=precomputed[0],
+                    height=height,
+                    std=stdev,
+                    sampling_rate=sampling_rate,
+                    comp_label=label,
+                    cfg=cfg,
+                )
+                # But only use the left boundary, keep the precomputed right
+                left_idx = max(0, left_idx)
+            else:
+                # Shouldn't happen, but fallback to standard method
+                left_idx, right_idx = find_asymmetric_bounds_stdguided(
+                    sig=signal,
+                    center_idx=approx_center_idx,
+                    height=height,
+                    std=stdev,
+                    sampling_rate=sampling_rate,
+                    comp_label=label,
+                    cfg=cfg,
+                )
+                left_idx = max(0, left_idx)
+                right_idx = min(len(signal) - 1, right_idx)
+        else:
+            # Standard method: compute both boundaries
+            left_idx, right_idx = find_asymmetric_bounds_stdguided(
+                sig=signal,
+                center_idx=approx_center_idx,
+                height=height,
+                std=stdev,
+                sampling_rate=sampling_rate,
+                comp_label=label,
+                cfg=cfg,
+            )
+            left_idx = max(0, left_idx)
+            right_idx = min(len(signal) - 1, right_idx)
+        
         if right_idx <= left_idx:
             continue
 

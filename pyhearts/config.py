@@ -57,6 +57,8 @@ class ProcessCycleConfig:
     p_use_training_as_primary: bool = False  # Use training thresholds as PRIMARY validation (vs secondary check)
     p_safety_margin_ms: float = 60.0     # Safety margin before Q/R peak (adjustable, default 60ms)
     p_use_fixed_window_method: bool = False  # Use fixed-window P wave detection (1-60 Hz filter, fixed search window, derivative zero-crossing)
+    p_use_improved_method: bool = False  # Use improved P wave detection (deprecated in favor of derivative-validated method)
+    p_use_derivative_validated_method: bool = False  # Use derivative-validated P wave detection (derivative-based with comprehensive validation)
     
     # ---- Amplitude ratios to avoid noise ---
     # Increased P wave minimum ratio from 0.02 to 0.03 to reduce false positives (low precision issue)
@@ -301,8 +303,10 @@ class ProcessCycleConfig:
             pwave_bandpass_low_hz=4.0,   # Optimized: 4-18 Hz gives best bias+MAE (for standard method)
             pwave_bandpass_high_hz=18.0,
             pwave_bandpass_order=4,
-            p_use_fixed_window_method=True,  # Enable fixed-window P detection with derivative zero-crossing (uses 1-60 Hz filter internally)
-            version="v1.7-human-fixed-window-pwave",
+            p_use_fixed_window_method=False,  # Fixed-window method (deprecated)
+            p_use_improved_method=False,  # Improved method (deprecated in favor of derivative-validated method)
+            p_use_derivative_validated_method=True,  # Enable derivative-validated P detection
+            version="v1.9-human-derivative-validated-pwave",
         )
 
 #
