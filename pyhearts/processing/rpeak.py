@@ -392,7 +392,7 @@ def _training_phase_signal_noise_separation(
     training_end_sec: float = 3.0,
 ) -> tuple[float, float]:
     """
-    ECGPUWAVE-style training phase: separate signal peaks from noise peaks.
+    Training phase: separate signal peaks from noise peaks using adaptive thresholds.
     
     Analyzes first 1-3 seconds to learn signal characteristics:
     - Signal peak: highest peak in training window
@@ -468,7 +468,7 @@ def _filter_rr_intervals(
     upper_frac: float = 1.16,
 ) -> np.ndarray:
     """
-    Filter RR intervals to remove outliers (ECGPUWAVE-style).
+    Filter RR intervals to remove outliers using median-based bounds.
     
     Only keeps RR intervals within [lower_frac * median, upper_frac * median].
     
@@ -507,7 +507,7 @@ def _calculate_maximum_slope(
     """
     Calculate maximum absolute derivative slope in window before peak.
     
-    This is used for slope-based discrimination (ECGPUWAVE-style).
+    This is used for slope-based discrimination.
     
     Parameters
     ----------
@@ -627,7 +627,7 @@ def _validate_qrs_characteristics(
     Checks slope, width, and other QRS characteristics to ensure
     the peak is a valid R peak (not a P or T wave).
     
-    Uses same validation criteria for both polarities (ECGPUWave-style).
+    Uses same validation criteria for both polarities.
     
     Parameters
     ----------
@@ -694,12 +694,12 @@ def _detect_r_peaks_single_polarity(
     sensitivity: Literal["standard", "high", "maximum"] = "standard",
 ) -> np.ndarray:
     """
-    Detect R peaks in a single polarity (ECGPUWAVE-style multi-pass detection).
+    Detect R peaks in a single polarity using multi-pass detection.
     
     This is a helper function that performs the full detection pipeline for one polarity.
     Applied to both positive and negative peaks separately, then results are merged.
     
-    Key ECGPUWAVE principles:
+    Key principles:
     - Uses absolute values for threshold calculations (works with signal as-is)
     - Training phase should work on absolute signal values
     - Amplitude filtering should use absolute peak heights
@@ -725,18 +725,18 @@ def _detect_r_peaks_single_polarity(
     # ----- Compute derivative for slope-based discrimination -----
     derivative = np.gradient(ecg_for_detection)
 
-    # ----- ECGPUWAVE-style training phase: signal/noise separation -----
-    # ECGPUWave works with signal as-is (doesn't negate)
+    # ----- Training phase: signal/noise separation -----
+    # Works with signal as-is (doesn't negate)
     # For threshold calculation, we need to use the signal we're actually detecting peaks on
     # (ecg_for_detection), not the absolute values, because find_peaks uses the actual signal
     signal_peak, noise_peak = _training_phase_signal_noise_separation(
         ecg_for_detection, derivative, sampling_rate
     )
     
-    # ECGPUWAVE threshold formula: noise + 0.25*(signal - noise)
-    ecgpuwave_threshold = noise_peak + 0.25 * (signal_peak - noise_peak)
+    # Training threshold formula: noise + 0.25*(signal - noise)
+    training_threshold = noise_peak + 0.25 * (signal_peak - noise_peak)
     
-    # Use ECGPUWAVE threshold if it's reasonable, otherwise fall back to adaptive
+    # Use training threshold if it's reasonable, otherwise fall back to adaptive
     # Use the signal we're detecting on for adaptive threshold
     adaptive_threshold = _adaptive_prominence_threshold(
         ecg_for_detection, cfg.rpeak_prominence_multiplier, sensitivity
@@ -744,7 +744,7 @@ def _detect_r_peaks_single_polarity(
     
     # Use the more conservative of the two thresholds
     # But ensure it's not too high - use minimum of the two if one is much larger
-    prominence_threshold = max(ecgpuwave_threshold, adaptive_threshold * 0.5)
+    prominence_threshold = max(training_threshold, adaptive_threshold * 0.5)
     
     # Safety check: if threshold is too high relative to signal, reduce it
     # This can happen if training phase finds very large peaks
@@ -761,7 +761,7 @@ def _detect_r_peaks_single_polarity(
         initial_r_peaks = peaks_lo.astype(int)
         median_rr_samples = distance_lo  # fallback
     else:
-        # Use filtered RR intervals (ECGPUWAVE-style)
+        # Use filtered RR intervals (median-based filtering)
         rr_intervals = np.diff(peaks_lo)
         filtered_rr_intervals = _filter_rr_intervals(
             rr_intervals,
@@ -785,7 +785,7 @@ def _detect_r_peaks_single_polarity(
             ecg_for_detection, distance=distance, prominence=prominence_threshold
         )
     
-    # ----- QRS characteristic filtering: reject T-waves and P-waves (ECGPUWAVE-style) -----
+    # ----- QRS characteristic filtering: reject T-waves and P-waves -----
     # Apply same validation criteria to both polarities
     if initial_r_peaks.size > 0:
         # Calculate slopes for all peaks
@@ -816,14 +816,14 @@ def _detect_r_peaks_single_polarity(
         # For now, we use slope-based filtering which is more reliable
     
     # ----- Amplitude filtering: remove P/T waves detected as R-peaks -----
-    # ECGPUWave approach: Use absolute values for amplitude comparison
+    # Use absolute values for amplitude comparison
     # This ensures correct filtering for both positive and negative peaks
-    # ECGPUWave is more lenient - it uses percentile-based filtering rather than
+    # More lenient approach - uses percentile-based filtering rather than
     # strict max-based filtering to handle mixed-polarity signals
     if initial_r_peaks.size > 0:
         peak_heights = np.abs(ecg_for_detection[initial_r_peaks])  # Use absolute values
         
-        # ECGPUWave-style: Use percentile-based threshold instead of max-based
+        # Use percentile-based threshold instead of max-based
         # This is more robust for mixed-polarity signals
         if len(peak_heights) >= 3:
             # Use 60th percentile as threshold (more lenient than 50% of max)
@@ -836,7 +836,7 @@ def _detect_r_peaks_single_polarity(
         amplitude_mask = peak_heights >= height_threshold
         initial_r_peaks = initial_r_peaks[amplitude_mask]
     
-    # ----- Third pass: aggressive gap-filling with backtracking (ECGPUWAVE-style) -----
+    # ----- Third pass: aggressive gap-filling with backtracking -----
     if initial_r_peaks.size >= 2:
         # Use filtered RR intervals for gap detection
         rr_intervals = np.diff(initial_r_peaks)
@@ -866,7 +866,7 @@ def _detect_r_peaks_single_polarity(
             if gap_segment.size < 10:
                 continue
             
-            # Progressive threshold reduction (ECGPUWAVE-style backtracking)
+            # Progressive threshold reduction (backtracking approach)
             found_peak = False
             for threshold_level in range(5):  # Max 5 levels
                 if threshold_level == 0:
@@ -923,7 +923,7 @@ def _detect_r_peaks_derivative_based(
     sensitivity: Literal["standard", "high", "maximum"] = "standard",
 ) -> np.ndarray:
     """
-    Detect R peaks using derivative-based single-pass approach (ECGPUWave-style).
+    Detect R peaks using derivative-based single-pass approach.
     
     This function works with the signal as-is (no negation), finds zero-crossings
     in the derivative to detect peaks in both directions, and filters by slope
@@ -946,17 +946,17 @@ def _detect_r_peaks_derivative_based(
     np.ndarray
         Indices of detected R-peaks (both polarities, single pass).
     """
-    # Compute derivative (ECGPUWave uses derivative for peak detection)
+    # Compute derivative (used for peak detection)
     derivative = np.gradient(ecg_filtered)
     
-    # Training phase: signal/noise separation (ECGPUWave-style)
+    # Training phase: signal/noise separation
     signal_peak, noise_peak = _training_phase_signal_noise_separation(
         ecg_filtered, derivative, sampling_rate
     )
     
-    # ECGPUWave threshold formula: noise + 0.25*(signal - noise)
+    # Training threshold formula: noise + 0.25*(signal - noise)
     # Use prominence threshold based on training phase
-    ecgpuwave_threshold = noise_peak + 0.25 * (signal_peak - noise_peak)
+    training_threshold = noise_peak + 0.25 * (signal_peak - noise_peak)
     
     # Adaptive threshold as fallback
     adaptive_threshold = _adaptive_prominence_threshold(
@@ -964,14 +964,14 @@ def _detect_r_peaks_derivative_based(
     )
     
     # Use the more conservative threshold
-    prominence_threshold = max(ecgpuwave_threshold, adaptive_threshold * 0.5)
+    prominence_threshold = max(training_threshold, adaptive_threshold * 0.5)
     
     # Safety check
     signal_max = float(np.max(np.abs(ecg_filtered)))
     if prominence_threshold > signal_max * 0.8:
         prominence_threshold = signal_max * 0.3
     
-    # ECGPUWave-style: Find peaks using derivative magnitude (slope)
+    # Find peaks using derivative magnitude (slope)
     # R peaks have high derivative slope regardless of polarity
     # Use absolute derivative to find high-slope regions
     abs_derivative = np.abs(derivative)
@@ -1164,7 +1164,7 @@ def r_peak_detection(
     """
     Enhanced multi-pass R-peak detection with simultaneous dual-polarity detection.
     
-    ECGPUWAVE-style improvements:
+    Multi-pass detection improvements:
     1. Explicit training phase (1-3s) to separate signal from noise
     2. Filtered RR intervals (filter outliers: 92-116% of median) before calculating expected RR
     3. Slope-based discrimination to reject T-waves (reject if slope < 75% of median QRS slope)
@@ -1227,7 +1227,7 @@ def r_peak_detection(
     else:
         ecg_filtered = ecg
 
-    # ----- Derivative-based single-pass detection (ECGPUWave-style) -----
+    # ----- Derivative-based single-pass detection -----
     # Works with signal as-is, finds zero-crossings in derivative,
     # filters by slope magnitude - naturally handles both polarities
     final_filtered_r_peaks = _detect_r_peaks_derivative_based(

@@ -1,7 +1,7 @@
 """
 P Wave Training Phase
 
-Implements ECGpuwave-style training phase for P wave detection:
+Implements training phase for P wave detection using adaptive signal/noise separation:
 - Analyzes first 1-3 seconds to learn signal characteristics
 - Separates P wave peaks from noise peaks
 - Establishes adaptive thresholds for P wave validation
@@ -25,7 +25,7 @@ def compute_p_training_phase_thresholds(
     bandpass_order: int = 2,
 ) -> Tuple[float, float]:
     """
-    Compute P wave training phase thresholds (ECGPUWAVE-style).
+    Compute P wave training phase thresholds using adaptive signal/noise separation.
     
     Analyzes first 1-3 seconds to learn P wave characteristics:
     - Signal peak: highest P wave peak in training window

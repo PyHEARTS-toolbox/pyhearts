@@ -265,9 +265,9 @@ class PyHEARTS:
         full_derivative : np.ndarray, optional
             Full-signal derivative for T-peak detection.
         p_training_signal_peak : float, optional
-            P wave training phase signal peak threshold (ECGPUWAVE-style).
+            P wave training phase signal peak threshold (adaptive signal/noise separation).
         p_training_noise_peak : float, optional
-            P wave training phase noise peak threshold (ECGPUWAVE-style).
+            P wave training phase noise peak threshold (adaptive signal/noise separation).
     
         Returns
         -------
@@ -438,7 +438,7 @@ class PyHEARTS:
             # Precomputed peaks are no longer used (derivative-based detection removed)
             precomputed_peaks = None
             
-            # Compute P wave training phase thresholds (ECGPUWAVE-style)
+            # Compute P wave training phase thresholds (adaptive signal/noise separation)
             # Analyzes first 1-3 seconds to learn P wave signal vs noise characteristics
             p_training_signal_peak = None
             p_training_noise_peak = None

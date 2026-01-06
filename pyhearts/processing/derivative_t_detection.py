@@ -31,17 +31,17 @@ def compute_filtered_derivative(
     sampling_rate : float
         Sampling rate in Hz.
     lowpass_cutoff : float, default 40.0
-        Low-pass filter cutoff frequency in Hz (ECGPUWAVE uses 40 Hz).
+        Low-pass filter cutoff frequency in Hz (default: 40 Hz).
     
     Returns
     -------
     np.ndarray
-        Filtered derivative signal (like ECGPUWAVE's dbuf).
+        Filtered derivative signal (dbuf: derivative buffer).
     """
     if len(signal) < 3:
         return np.zeros_like(signal)
     
-    # Apply low-pass filter (40 Hz) - ECGPUWAVE's fpb filter
+    # Apply low-pass filter (40 Hz) - fpb: filtered preprocessed buffer
     nyq = sampling_rate / 2.0
     if lowpass_cutoff >= nyq:
         # If cutoff too high, just compute derivative
@@ -187,7 +187,7 @@ def find_t_wave_boundary(
     # Compute adaptive kte
     kte = compute_adaptive_kte(peak_amplitude)
     
-    # Compute threshold (ECGPUWAVE logic)
+    # Compute threshold using adaptive scaling
     if kte / back_factor >= 1.1:
         threshold = peak_amplitude * back_factor / kte
     else:
@@ -310,7 +310,7 @@ def detect_t_wave_derivative_based(
             print(f"  No valid T wave - insufficient derivative variation ({deriv_variation:.4f})")
         return None, None, None, None, 6
     
-    # Allow T waves even if derivative is mostly one-sided (ECGPUWAVE handles this)
+    # Allow T waves even if derivative is mostly one-sided
     # The morphology detection will determine if it's normal or inverted
     
     # Determine morphology based on SIGNAL values relative to baseline/R peak
@@ -351,7 +351,7 @@ def detect_t_wave_derivative_based(
         # Determine morphology: Check which peak is more prominent
         # For inverted T waves (like sel117), the negative peak should be clearly dominant
         # For normal T waves, the positive peak should be dominant
-        # Use absolute prominence to determine morphology (ECGPUWAVE approach)
+        # Use absolute prominence to determine morphology
         # IMPORTANT: For detrended signals, the baseline may be shifted, so we need to be careful
         
         # Calculate absolute prominence (distance from median)
@@ -472,7 +472,7 @@ def detect_t_wave_derivative_based(
         signal_peak_idx = t_region_start + t_peak_rel
     
     # Secondary method: Find ALL zero-crossings in T wave region
-    # ECGPUWAVE searches for zero-crossings throughout the T wave region, not just near min/max
+    # Search for zero-crossings throughout the T wave region, not just near min/max
     # Find all zero-crossings in the T wave region
     all_zero_crossings = []
     
@@ -581,7 +581,7 @@ def detect_t_wave_derivative_based(
     # Ensure boundaries are within valid range
     if s_end_idx is not None:
         if t_start is not None and t_start < s_end_idx:
-            t_start = s_end_idx + 2  # ECGPUWAVE's fallback
+            t_start = s_end_idx + 2  # Fallback adjustment
     
     if t_start is not None and t_start < search_start:
         t_start = search_start

@@ -125,10 +125,10 @@ def gate_by_adaptive_threshold(
         Expected peak polarity; defaults to "positive" for P/T if None.
     base_threshold : float or None, optional
         Base threshold value. If None, uses component-specific defaults:
-        - T wave: 3.5 (kte from ECGPUWAVE)
-        - P wave: 2.0 (ktb from ECGPUWAVE)
+        - T wave: 3.5 (kte threshold)
+        - P wave: 2.0 (ktb threshold)
     amplitude_ranges : list of (min_amp, max_amp, scale_factor), optional
-        Custom amplitude ranges for adaptive scaling. If None, uses ECGPUWAVE defaults.
+        Custom amplitude ranges for adaptive scaling. If None, uses default thresholds.
     verbose : bool, default False
         If True, print diagnostic messages.
     
@@ -144,7 +144,7 @@ def gate_by_adaptive_threshold(
     if n < 3 or not np.isfinite(seg_raw).all():
         return [False, None, None]
     
-    # Default base thresholds (from ECGPUWAVE)
+    # Default base thresholds
     if base_threshold is None:
         base_threshold = 3.5 if comp == "T" else 2.0  # kte for T, ktb for P
     
@@ -173,7 +173,7 @@ def gate_by_adaptive_threshold(
         amplitude_ranges=amplitude_ranges,
     )
     
-    # ECGPUWAVE uses the threshold to find wave boundaries, but for peak validation,
+    # The threshold is used to find wave boundaries, but for peak validation,
     # we compare the peak amplitude to a scaled version of itself
     # The logic: if the wave is large enough to have a scaled threshold, it's valid
     
@@ -183,7 +183,7 @@ def gate_by_adaptive_threshold(
     # - Medium waves: use intermediate thresholds
     
     # Compute minimum required amplitude based on adaptive threshold
-    # ECGPUWAVE's approach: the threshold is used for boundary detection,
+    # The threshold is used for boundary detection,
     # but for peak validation, we check if the peak amplitude is reasonable
     # relative to the adaptive threshold
     
@@ -218,12 +218,12 @@ def gate_by_adaptive_threshold(
     verbose: bool = False,
 ) -> list[bool | int | float | None]:
     """
-    ECGPUWAVE-style adaptive threshold gate with relative amplitude checking.
+    Adaptive threshold gate with relative amplitude checking.
     
-    This version mirrors ECGPUWAVE's approach more closely by:
+    This version uses adaptive scaling by:
     1. Using adaptive thresholds based on wave amplitude
     2. Optionally checking relative to R peak amplitude
-    3. Using ECGPUWAVE's exact scaling logic
+    3. Using amplitude-based threshold scaling logic
     
     Parameters
     ----------
@@ -257,7 +257,7 @@ def gate_by_adaptive_threshold(
     if n < 3 or not np.isfinite(seg_raw).all():
         return [False, None, None]
     
-    # Default base thresholds (from ECGPUWAVE)
+    # Default base thresholds
     if base_threshold is None:
         base_threshold = 3.5 if comp == "T" else 2.0  # kte for T, ktb for P
     
@@ -279,7 +279,7 @@ def gate_by_adaptive_threshold(
     raw_height = float(seg_raw[cand_rel_idx])
     abs_height = abs(raw_height)
     
-    # ECGPUWAVE's adaptive threshold logic (from tbound.m lines 196-201)
+    # Adaptive threshold logic with amplitude-based scaling
     # Scales threshold based on wave amplitude
     if abs_height >= 0.41:
         scaled_threshold = base_threshold * 2.0
@@ -292,7 +292,7 @@ def gate_by_adaptive_threshold(
     else:
         scaled_threshold = base_threshold  # No scaling for very small waves
     
-    # Validation: ECGPUWAVE accepts waves if they pass the adaptive threshold
+    # Validation: accept waves if they pass the adaptive threshold
     # For peak validation, we check:
     # 1. Minimum absolute amplitude (very small waves might be noise)
     # 2. Relative to R peak if provided
@@ -320,7 +320,7 @@ def gate_by_adaptive_threshold(
     keep = abs_height >= min_required
     
     if verbose:
-        print(f"[ECGPUWAVE-style] {comp} wave: amplitude={abs_height:.4f} mV, "
+        print(f"[Adaptive threshold] {comp} wave: amplitude={abs_height:.4f} mV, "
               f"scaled_threshold={scaled_threshold:.4f}, "
               f"min_required={min_required:.4f}, keep={keep}")
         if r_peak_amplitude is not None:

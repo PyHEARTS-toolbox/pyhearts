@@ -1,0 +1,6 @@
+subject,sampling_rate,qtdb_r_count,qtdb_p_count,pyhearts_r_count,pyhearts_p_count,matched_r_count,p_detection_rate,p_mae_ms,p_median_error_ms,p_matched_count,p_total_beats,use_ecgpuwave_method
+sel30,250,30,30,1000,1000,30,0.0,,,0,0,True
+sel100,250,30,30,1103,1026,30,100.0,0.0,0.0,1,1,True
+sel117,250,30,30,502,471,24,0.0,,,0,3,True
+sel213,250,71,71,1565,1552,61,0.0,,,0,2,True
+sel301,250,30,30,1204,1168,20,60.0,7.666666666666667,6.0,12,20,True

@@ -356,7 +356,7 @@ def estimate_local_baseline(
     cfg = cfg or ProcessCycleConfig()
     baseline_window_frac = cfg.local_baseline_window_fraction
     
-    # For P-wave onset, use more of the pre-P region for baseline (ECGPUWAVE approach)
+    # For P-wave onset, use more of the pre-P region for baseline
     if comp_label == "P" and direction in ("left", "both"):
         # Use larger window for P-wave baseline estimation
         baseline_window_frac = min(0.5, baseline_window_frac * 1.5)
@@ -547,7 +547,7 @@ def find_waveform_limit_derivative(
         sig, center_idx, search_samples, direction=direction, cfg=cfg, comp_label=comp_label
     )
     
-    # Step 4: Adjust sensitivity for P-waves and T-offset (ECGPUWAVE-style)
+    # Step 4: Adjust sensitivity for P-waves and T-offset
     deriv_multiplier = cfg.waveform_limit_deriv_multiplier
     baseline_multiplier = cfg.waveform_limit_baseline_multiplier
     
@@ -556,7 +556,7 @@ def find_waveform_limit_derivative(
         deriv_multiplier *= cfg.p_wave_deriv_sensitivity_multiplier * 0.6  # extra sensitivity
         baseline_multiplier *= 1.2  # more lenient baseline proximity for P onset
     elif comp_label == "T" and direction == "right":
-        # T-wave offset: stricter baseline tolerance (ECGPUWAVE approach)
+        # T-wave offset: stricter baseline tolerance
         # Require signal to be closer to baseline before detecting offset
         baseline_multiplier *= 0.7  # Stricter: 70% of default tolerance
         deriv_multiplier *= 1.3  # Less sensitive: require smaller derivative (130% of default)
@@ -564,7 +564,7 @@ def find_waveform_limit_derivative(
     # Step 5: Adaptive threshold: derivative must drop to < noise_level × multiplier
     deriv_threshold = local_noise * deriv_multiplier
     
-    # Step 6: Search from peak outward (ECGPUWAVE-style for P onset)
+    # Step 6: Search from peak outward (for P onset)
     limit_idx = center_idx
     
     # Map center_idx to segment coordinates
@@ -573,9 +573,9 @@ def find_waveform_limit_derivative(
     else:  # right
         center_in_segment = 0  # center is at start of segment for right search
     
-    # For P-wave onset, use more sophisticated detection (ECGPUWAVE-style)
+    # For P-wave onset, use more sophisticated detection
     if comp_label == "P" and direction == "left":
-        # ECGPUWAVE approach: find where signal transitions from baseline to rising
+        # Find where signal transitions from baseline to rising
         # More conservative: require clear evidence of transition
         
         best_onset = center_idx
@@ -621,7 +621,7 @@ def find_waveform_limit_derivative(
                                 signal_ahead_2 > signal_ahead_1 and
                                 signal_ahead_3 > signal_ahead_2)
             
-            # P onset criteria (conservative ECGPUWAVE-style):
+            # P onset criteria (conservative):
             # 1. At baseline ✓
             # 2. Current derivative is small (not yet rising significantly)
             # 3. Derivative ahead is clearly positive AND signal ahead shows sustained rise
@@ -673,7 +673,7 @@ def find_waveform_limit_derivative(
             # Transition found if: at baseline AND derivative small
             # OR: curvature change detected (inflection point)
             if (at_baseline and deriv_small) or (curvature_change and at_baseline):
-                # For T-offset, require sustained baseline (ECGPUWAVE approach)
+                # For T-offset, require sustained baseline
                 # T-waves have long tails - need to ensure signal stays at baseline
                 if comp_label == "T" and direction == "right":
                     # Check if signal stays at baseline for next few samples
@@ -754,7 +754,7 @@ def find_asymmetric_bounds_stdguided(
     standard deviation and physiologic window constraints.
     
     Uses a hybrid approach:
-    1. Primary: derivative-based waveform limit detection (ECGPUWAVE-style)
+    1. Primary: derivative-based waveform limit detection
     2. Fallback: adaptive threshold crossing if derivative method fails
     
     The derivative-based method detects actual signal changes (slope/curvature)

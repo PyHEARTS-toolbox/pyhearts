@@ -24,7 +24,7 @@ def validate_p_wave_morphology(
     """
     Validate P wave morphology to distinguish P waves from Q peaks.
     
-    ECGPUWave-style validation using:
+    Morphology-based validation using:
     1. Duration: P waves are 60-200ms wide, Q peaks are 20-40ms
     2. Shape: P waves have gradual rise/fall (low max derivative), Q peaks are sharp (high derivative)
     3. Onset/Offset detection: P waves should have detectable onset and offset points
@@ -131,7 +131,7 @@ def validate_p_wave_morphology(
     duration_samples = offset_idx - onset_idx
     duration_ms = (duration_samples / sampling_rate) * 1000.0
     
-    # Morphology validation criteria (ECGPUWave-style):
+    # Morphology validation criteria:
     # 1. Duration: P waves are 30-200ms, Q peaks are 10-30ms
     # Use lenient minimum (30ms) - some P waves can be short
     min_p_duration_ms = 30.0  # Very lenient - P waves can be as short as 30ms
@@ -275,7 +275,7 @@ def log_peak_result(
     Apply polarity and relative-amplitude checks for a single component.
     
     For P waves, also validates distance from QRS complex to avoid misclassifying
-    Q peaks as P waves (ECGPUWave-style validation).
+    Q peaks as P waves (morphology-based validation).
     """
     # Missing or invalid amplitude
     if center_idx is None or height is None or not np.isfinite(height):
@@ -283,7 +283,7 @@ def log_peak_result(
             print(f"[Cycle {cycle_idx}]: {comp} peak not found.")
         return None, None
 
-    # ECGPUWave-style P wave validation: reject P waves too close to QRS
+    # P wave validation: reject P waves too close to QRS
     # This prevents misclassifying inverted Q peaks as P waves when P is absent or too small
     if comp == "P" and r_center_idx is not None and sampling_rate is not None:
         p_r_distance_samples = r_center_idx - center_idx
@@ -301,7 +301,7 @@ def log_peak_result(
             return None, None
         
         # If Q peak is detected, P should be well before Q (at least 50ms)
-        # ECGPUWave uses Q position to distinguish P from Q - if P is too close to Q,
+        # Use Q position to distinguish P from Q - if P is too close to Q,
         # it's likely a Q peak being misclassified as P (especially for inverted QRS)
         if q_center_idx is not None:
             p_q_distance_samples = q_center_idx - center_idx

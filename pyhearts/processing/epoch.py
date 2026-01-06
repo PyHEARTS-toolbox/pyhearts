@@ -66,7 +66,7 @@ def epoch_ecg(
       equal to half the average RR interval.
     - If skip_template_filtering=False (default), cycles are retained if they meet both
       a correlation (to the global template) and a variance criterion relative to the whole signal.
-    - If skip_template_filtering=True (ECGPUWave-style), all cycles are retained and validation
+    - If skip_template_filtering=True, all cycles are retained and validation
       happens at the peak level during process_cycle (physiological constraints, intervals, SNR).
     """
     # ---- config ----
@@ -185,9 +185,9 @@ def epoch_ecg(
 
     # --- Filter cycles by correlation and variance (unless skip_template_filtering=True) ---
     if skip_template_filtering:
-        # ECGPUWave-style: Keep all cycles, validate at peak level instead
+        # Keep all cycles, validate at peak level instead
         if verbose:
-            print(f"Skipping template-based filtering (ECGPUWave-style): processing all {len(all_cycles_arr)} cycles")
+            print(f"Skipping template-based filtering: processing all {len(all_cycles_arr)} cycles")
         
         for cycle, meta in zip(all_cycles_arr, all_metadata):
             # Append rows for this cycle (long-form table)

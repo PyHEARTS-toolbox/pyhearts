@@ -56,7 +56,7 @@ class ProcessCycleConfig:
     p_use_training_phase: bool = False   # Enable training-phase adaptive thresholds
     p_use_training_as_primary: bool = False  # Use training thresholds as PRIMARY validation (vs secondary check)
     p_safety_margin_ms: float = 60.0     # Safety margin before Q/R peak (adjustable, default 60ms)
-    p_use_ecgpuwave_method: bool = False  # Use fixed-window P wave detection (1-60 Hz filter, fixed search window, derivative zero-crossing)
+    p_use_fixed_window_method: bool = False  # Use fixed-window P wave detection (1-60 Hz filter, fixed search window, derivative zero-crossing)
     
     # ---- Amplitude ratios to avoid noise ---
     # Increased P wave minimum ratio from 0.02 to 0.03 to reduce false positives (low precision issue)
@@ -208,8 +208,8 @@ class ProcessCycleConfig:
             raise ValueError("sharp_amp_norm ∈ {'p2p','rms','mad'}")
         
         # r-peak
-        if self.rpeak_method not in {"prominence", "pan_tompkins", "bandpass_energy", "ecgpuwave_style"}:
-            raise ValueError("rpeak_method must be 'prominence', 'pan_tompkins', 'bandpass_energy', or 'ecgpuwave_style'")
+        if self.rpeak_method not in {"prominence", "pan_tompkins", "bandpass_energy", "derivative_based"}:
+            raise ValueError("rpeak_method must be 'prominence', 'pan_tompkins', 'bandpass_energy', or 'derivative_based'")
         lo_bpm, hi_bpm = self.rpeak_bpm_bounds
         if not (0 < lo_bpm < hi_bpm):
             raise ValueError("rpeak_bpm_bounds require 0 < low < high")
@@ -267,6 +267,7 @@ class ProcessCycleConfig:
         Preset tuned for adult human physiology.
         
         Optimized based on QTDB benchmark (Dec 2024) and diagnostic analysis:
+        - Enabled fixed-window P wave detection with derivative zero-crossing (1-60 Hz filter)
         - Increased P-wave SNR threshold to reduce false positives
         - Narrowed P-wave search window for better accuracy
         - Increased R-peak prominence for better precision
@@ -297,10 +298,11 @@ class ProcessCycleConfig:
             t_wave_offset_smoothing_window_ms=50,
             detect_u_wave=True,
             pwave_use_bandpass=True,  # Enable band-pass filter for P-wave detection
-            pwave_bandpass_low_hz=4.0,   # Optimized: 4-18 Hz gives best bias+MAE
+            pwave_bandpass_low_hz=4.0,   # Optimized: 4-18 Hz gives best bias+MAE (for standard method)
             pwave_bandpass_high_hz=18.0,
             pwave_bandpass_order=4,
-            version="v1.6-human-pwave-optimized",
+            p_use_fixed_window_method=True,  # Enable fixed-window P detection with derivative zero-crossing (uses 1-60 Hz filter internally)
+            version="v1.7-human-fixed-window-pwave",
         )
 
 #

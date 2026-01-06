@@ -246,7 +246,7 @@ def find_peaks(
             print(f"[Cycle {cycle_idx}]: Invalid segment for {label} peak (start={start_idx}, end={end_idx})")
         return None, None, None
 
-    # Use derivative-based detection if requested (ECGPUWAVE-style)
+    # Use derivative-based detection if requested
     if use_derivative:
         polarity = "positive" if mode == "max" else "negative"
         idx_absolute, amplitude = find_peak_derivative_based(
