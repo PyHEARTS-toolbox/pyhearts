@@ -285,44 +285,49 @@ def log_peak_result(
 
     # P wave validation: reject P waves too close to QRS
     # This prevents misclassifying inverted Q peaks as P waves when P is absent or too small
+    # Can be disabled via config to match ecgpuwave style (no distance checks)
     if comp == "P" and r_center_idx is not None and sampling_rate is not None:
-        p_r_distance_samples = r_center_idx - center_idx
-        p_r_distance_ms = (p_r_distance_samples / sampling_rate) * 1000.0
+        # Check if distance validation is enabled (default True for backward compatibility)
+        enable_distance_validation = getattr(cfg, "p_enable_distance_validation", True) if cfg is not None else True
         
-        # P waves should be at least 100ms before R peak (to avoid QRS complex and Q peaks)
-        # Typical P-R intervals are 120-200ms, but can be as short as 100-120ms in some cases.
-        # ECGPUWAVE shows P-R intervals as low as 124ms, so we use 100ms to avoid rejecting valid P waves.
-        # If P is too close to R (< 100ms), it's likely a Q peak or QRS artifact, not a P wave.
-        min_p_r_distance_ms = 100.0
-        if p_r_distance_ms < min_p_r_distance_ms:
-            if verbose:
-                print(f"[Cycle {cycle_idx}]: P wave rejected - too close to R peak "
-                      f"({p_r_distance_ms:.1f}ms < {min_p_r_distance_ms}ms). Likely Q peak or QRS artifact, not P wave.")
-            return None, None
-        
-        # If Q peak is detected, P should be well before Q (at least 50ms)
-        # Use Q position to distinguish P from Q - if P is too close to Q,
-        # it's likely a Q peak being misclassified as P (especially for inverted QRS)
-        if q_center_idx is not None:
-            p_q_distance_samples = q_center_idx - center_idx
-            p_q_distance_ms = (p_q_distance_samples / sampling_rate) * 1000.0
+        if enable_distance_validation:
+            p_r_distance_samples = r_center_idx - center_idx
+            p_r_distance_ms = (p_r_distance_samples / sampling_rate) * 1000.0
             
-            # Stricter threshold: P should be at least 50ms before Q
-            # If P is within 50ms of Q, it's likely part of the QRS complex, not a true P wave
-            min_p_q_distance_ms = 50.0
-            if p_q_distance_ms < min_p_q_distance_ms:
+            # P waves should be at least 100ms before R peak (to avoid QRS complex and Q peaks)
+            # Typical P-R intervals are 120-200ms, but can be as short as 100-120ms in some cases.
+            # ECGPUWAVE shows P-R intervals as low as 124ms, so we use 100ms to avoid rejecting valid P waves.
+            # If P is too close to R (< 100ms), it's likely a Q peak or QRS artifact, not a P wave.
+            min_p_r_distance_ms = 100.0
+            if p_r_distance_ms < min_p_r_distance_ms:
                 if verbose:
-                    print(f"[Cycle {cycle_idx}]: P wave rejected - too close to Q peak "
-                          f"({p_q_distance_ms:.1f}ms < {min_p_q_distance_ms}ms). Likely Q peak misclassified as P.")
+                    print(f"[Cycle {cycle_idx}]: P wave rejected - too close to R peak "
+                          f"({p_r_distance_ms:.1f}ms < {min_p_r_distance_ms}ms). Likely Q peak or QRS artifact, not P wave.")
                 return None, None
             
-            # Additional check: if P-Q distance is very short (< 100ms), be suspicious
-            # True P waves are typically 100-200ms before Q, not 50-100ms
-            if p_q_distance_ms < 100.0:
-                if verbose:
-                    print(f"[Cycle {cycle_idx}]: P wave warning - P-Q distance is short "
-                          f"({p_q_distance_ms:.1f}ms < 100ms). May be Q peak.")
-                # Don't reject, but log warning for now
+            # If Q peak is detected, P should be well before Q (at least 50ms)
+            # Use Q position to distinguish P from Q - if P is too close to Q,
+            # it's likely a Q peak being misclassified as P (especially for inverted QRS)
+            if q_center_idx is not None:
+                p_q_distance_samples = q_center_idx - center_idx
+                p_q_distance_ms = (p_q_distance_samples / sampling_rate) * 1000.0
+                
+                # Stricter threshold: P should be at least 50ms before Q
+                # If P is within 50ms of Q, it's likely part of the QRS complex, not a true P wave
+                min_p_q_distance_ms = 50.0
+                if p_q_distance_ms < min_p_q_distance_ms:
+                    if verbose:
+                        print(f"[Cycle {cycle_idx}]: P wave rejected - too close to Q peak "
+                              f"({p_q_distance_ms:.1f}ms < {min_p_q_distance_ms}ms). Likely Q peak misclassified as P.")
+                    return None, None
+                
+                # Additional check: if P-Q distance is very short (< 100ms), be suspicious
+                # True P waves are typically 100-200ms before Q, not 50-100ms
+                if p_q_distance_ms < 100.0:
+                    if verbose:
+                        print(f"[Cycle {cycle_idx}]: P wave warning - P-Q distance is short "
+                              f"({p_q_distance_ms:.1f}ms < 100ms). May be Q peak.")
+                    # Don't reject, but log warning for now
         
         # Morphology-based validation: distinguish P waves from Q peaks using shape/duration
         # This works even when Q detection fails (e.g., at low sampling rates)
@@ -371,47 +376,21 @@ def log_peak_result(
         min_ratio = ratios.get(comp)
 
         if min_ratio is not None:
-            # For T waves in detrended signals, use a more lenient threshold
-            # Detrended signals have smaller amplitudes, so T waves can be valid even if < 3% of R
-            if comp == "T":
-                # Use lower threshold for T waves: 0.5% of R amplitude, or absolute minimum of 0.005 mV
-                # This accounts for detrended signals where amplitudes are significantly reduced
-                t_min_ratio = 0.005  # 0.5% instead of 3% (very lenient for detrended signals)
-                t_abs_min = 0.005  # Absolute minimum in mV (very small to allow detrended signals)
-                t_threshold = max(t_min_ratio * r_abs, t_abs_min)
-                
-                if abs(float(height)) < t_threshold:
-                    if verbose:
-                        print(
-                            f"[Cycle {cycle_idx}]: {comp} too small "
-                            f"({abs(float(height)):.3f} < {t_threshold:.3f})."
-                        )
-                    return None, None
-            elif comp == "P":
-                # For P waves in detrended signals, use a more lenient threshold
-                # Detrended signals have smaller amplitudes, so P waves can be valid even if < 3% of R
-                # Use lower threshold for P waves: 0.5% of R amplitude, or absolute minimum of 0.005 mV
-                p_min_ratio = 0.005  # 0.5% instead of 3% (very lenient for detrended signals)
-                p_abs_min = 0.005  # Absolute minimum in mV (very small to allow detrended signals)
-                p_threshold = max(p_min_ratio * r_abs, p_abs_min)
-                
-                if abs(float(height)) < p_threshold:
-                    if verbose:
-                        print(
-                            f"[Cycle {cycle_idx}]: {comp} too small "
-                            f"({abs(float(height)):.3f} < {p_threshold:.3f})."
-                        )
-                    return None, None
-            else:
-                # For other components, use original threshold
-                if abs(float(height)) < min_ratio * r_abs:
-                    if verbose:
-                        need = min_ratio * r_abs
-                        print(
-                            f"[Cycle {cycle_idx}]: {comp} too small "
-                            f"({abs(float(height)):.3f} < {need:.3f})."
-                        )
-                    return None, None
+            # Use config value for amplitude ratio (allows ecgpuwave-style higher thresholds)
+            # For P and T waves, use the config value directly (no hardcoded override)
+            # Absolute minimum check to avoid accepting noise
+            abs_min = 0.001  # Very small absolute minimum (1 microvolt) to avoid accepting pure noise
+            
+            # Calculate threshold: use config ratio, but ensure absolute minimum
+            threshold = max(min_ratio * r_abs, abs_min)
+            
+            if abs(float(height)) < threshold:
+                if verbose:
+                    print(
+                        f"[Cycle {cycle_idx}]: {comp} too small "
+                        f"({abs(float(height)):.3f} < {threshold:.3f}, ratio={min_ratio:.4f})."
+                    )
+                return None, None
 
     return center_idx, float(height)
 

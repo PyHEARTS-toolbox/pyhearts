@@ -748,7 +748,7 @@ def process_cycle(
                             previous_t_end_idx=previous_t_end_idx,  # Cycle-relative (or None)
                             previous_p_end_idx=previous_p_end_idx,  # Cycle-relative (or None)
                             max_derivative=max_derivative,
-                            verbose=True,  # Force verbose for debugging
+                            verbose=verbose,  # Use passed verbose flag
                             cycle_idx=cycle_idx,
                         )
                     except Exception as e:
@@ -1448,8 +1448,9 @@ def process_cycle(
     # - Noise level checks (2 separate checks)
     # - Temporal constraints (P-R separation, duration limits)
     # - Zero-crossing based peak localization
-    # Morphology validation is redundant and too strict, causing false rejections
-    skip_morphology_validation = True  # Skip for derivative-validated P waves
+    # Morphology validation can be disabled via config to match ecgpuwave style
+    enable_morphology = getattr(cfg, "p_enable_morphology_validation", True) if cfg is not None else True
+    skip_morphology_validation = not enable_morphology  # Skip if disabled in config
     
     if p_center_idx is not None and p_height is not None and not skip_morphology_validation:
         from pyhearts.processing.validation import validate_p_wave_morphology

@@ -217,7 +217,7 @@ def detect_p_wave_derivative_validated(
     iew = iew_original
     ibw = ibw_original
     outer_iteration = 0
-    max_outer_iterations = 10
+    max_outer_iterations = 6  # Reduced from 10 to 6 for performance (ECGPUWAVE typically uses fewer iterations)
     P_detected = False
     final_result = (None, None, None, None)
     
