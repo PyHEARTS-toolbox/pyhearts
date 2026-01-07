@@ -253,6 +253,10 @@ class PyHEARTS:
     
         Wraps `process_cycle` to update internal state with previous R/P indices, Gaussian
         fit parameters, and optionally corrected signals.
+        
+        # CRITICAL: Always log entry for cycles 50-60 to debug missing cycles 51-59
+        if 50 <= cycle_idx <= 60:
+            logging.info(f"[PROCESS_CYCLE_WRAPPER_ENTRY] Cycle {cycle_idx}: Entered process_cycle_wrapper, one_cycle len={len(one_cycle) if one_cycle is not None else None}")
     
         Parameters
         ----------
@@ -275,13 +279,19 @@ class PyHEARTS:
             Updates internal attributes: output_dict, previous centers, Gaussian parameters,
             and corrected signal dictionary.
         """
-        (
-            self.output_dict,
-            self.previous_r_center_samples,
-            self.previous_p_center_samples,
-            sig_corrected,
-            self.previous_gauss_features,
-        ) = process_cycle(
+        # CRITICAL: Always log entry for cycles 50-60 to debug missing cycles 51-59
+        if 50 <= cycle_idx <= 60:
+            logging.info(f"[PROCESS_CYCLE_WRAPPER_ENTRY] Cycle {cycle_idx}: Entered process_cycle_wrapper, one_cycle len={len(one_cycle) if one_cycle is not None else None}")
+        
+        # CRITICAL: Wrap process_cycle call in try-except to catch any silent failures
+        try:
+            (
+                self.output_dict,
+                self.previous_r_center_samples,
+                self.previous_p_center_samples,
+                sig_corrected,
+                self.previous_gauss_features,
+            ) = process_cycle(
             one_cycle,
             self.output_dict,
             self.sampling_rate,
@@ -299,7 +309,13 @@ class PyHEARTS:
             p_training_signal_peak=p_training_signal_peak,
             p_training_noise_peak=p_training_noise_peak,
         )
-
+        except Exception as e:
+            # CRITICAL: Always log exceptions in process_cycle to prevent silent failures
+            logging.error(f"[PROCESS_CYCLE_WRAPPER_ERROR] Cycle {cycle_idx}: Exception in process_cycle: {e}")
+            import traceback
+            logging.error(f"[PROCESS_CYCLE_WRAPPER_ERROR] Cycle {cycle_idx} traceback:\n{traceback.format_exc()}")
+            # Re-raise to let the caller handle it (they have their own exception handling)
+            raise
 
         if sig_corrected is not None:
             self.sig_corrected_dict[cycle_idx] = sig_corrected
@@ -434,6 +450,14 @@ class PyHEARTS:
             
             # Use the actual cycle labels from epochs_df (sorted for determinism)
             cycles = np.sort(epochs_df["cycle"].unique())
+            
+            # CRITICAL: Log cycles array to check if cycles 51-59 are present
+            logging.info(f"[CYCLES_ARRAY] Total cycles: {len(cycles)}, cycles 50-60: {cycles[50:61] if len(cycles) > 60 else cycles[50:]}")
+            if len(cycles) > 60:
+                cycles_51_59 = cycles[(cycles >= 51) & (cycles <= 59)]
+                logging.info(f"[CYCLES_ARRAY] Cycles 51-59 in array: {cycles_51_59}")
+                if len(cycles_51_59) < 9:
+                    logging.warning(f"[CYCLES_ARRAY] WARNING: Only {len(cycles_51_59)} of 9 expected cycles (51-59) found in cycles array!")
             
             # Precomputed peaks are no longer used (derivative-based detection removed)
             precomputed_peaks = None
@@ -576,11 +600,30 @@ class PyHEARTS:
             for cycle_idx, cycle_label in enumerate(cycles):
                 one_cycle = epochs_df.loc[epochs_df["cycle"] == cycle_label]
                 
+                # Always log cycle processing start for cycles 50-60 to debug missing cycles 51-59
+                if 50 <= cycle_idx <= 60:
+                    logging.info(f"[FIT_CYCLE_START] Cycle {cycle_idx} (label {cycle_label}, type={type(cycle_label).__name__}): Starting processing, one_cycle len={len(one_cycle)}")
+                    if len(one_cycle) == 0:
+                        logging.warning(f"[FIT_EMPTY_CYCLE] Cycle {cycle_idx} (label {cycle_label}): one_cycle is EMPTY! Checking epochs_df cycle column...")
+                        # Debug: Check what cycle values exist in epochs_df around this label
+                        unique_cycles = epochs_df["cycle"].unique()
+                        logging.warning(f"[FIT_EMPTY_CYCLE] Available cycle labels in epochs_df (sample): {sorted(unique_cycles)[50:61] if len(unique_cycles) > 60 else sorted(unique_cycles)[50:]}")
+                        logging.warning(f"[FIT_EMPTY_CYCLE] Cycle label type in epochs_df: {type(epochs_df['cycle'].iloc[0]).__name__ if len(epochs_df) > 0 else 'N/A'}")
+                
+                # Always log cycle processing start (sample every 10 cycles to avoid spam, but always log errors)
+                elif cycle_idx % 10 == 0 or cycle_idx < 20:
+                    logging.info(f"[FIT_CYCLE_START] Cycle {cycle_idx} (label {cycle_label}): Starting processing, one_cycle len={len(one_cycle)}")
+                
                 # Debug: Track cycle processing (first 3 cycles only to avoid spam)
                 if cycle_idx < 3:
                     logging.debug(f"[fit.py] Processing cycle {cycle_idx} (label {cycle_label}), verbose={self.verbose}")
                     if len(one_cycle) == 0:
                         logging.warning(f"[fit.py] Cycle {cycle_idx} is empty!")
+                
+                # Always log if cycle is empty (critical issue)
+                if len(one_cycle) == 0:
+                    logging.warning(f"[FIT_EMPTY_CYCLE] Cycle {cycle_idx} (label {cycle_label}): one_cycle is EMPTY! Skipping.")
+                    continue
                 
                 try:
                     self.process_cycle_wrapper(
@@ -591,6 +634,12 @@ class PyHEARTS:
                         p_training_noise_peak=p_training_noise_peak,
                     )
                     
+                    # Log completion (sample every 10 cycles)
+                    if cycle_idx % 10 == 0 or cycle_idx < 20:
+                        if self.output_dict is not None:
+                            r_val = self.output_dict.get("R_global_center_idx", [None])[cycle_idx] if cycle_idx < len(self.output_dict.get("R_global_center_idx", [])) else None
+                            logging.info(f"[FIT_CYCLE_END] Cycle {cycle_idx} (label {cycle_label}): Completed processing, R={r_val}")
+                    
                     # Debug: Check if peaks were stored after processing (first 3 cycles)
                     if cycle_idx < 3 and self.output_dict is not None:
                         r_val = self.output_dict.get("R_global_center_idx", [None])[cycle_idx] if cycle_idx < len(self.output_dict.get("R_global_center_idx", [])) else None
@@ -599,7 +648,7 @@ class PyHEARTS:
                         
                 except Exception as e:
                     # Always log errors, regardless of verbose setting
-                    logging.error(f"[CYCLE_ERROR] Error processing cycle {cycle_idx}: {e}")
+                    logging.error(f"[CYCLE_ERROR] Error processing cycle {cycle_idx} (label {cycle_label}): {e}")
                     import traceback
                     logging.error(f"[CYCLE_ERROR] Cycle {cycle_idx} traceback:\n{traceback.format_exc()}")
                     # Continue processing other cycles even if one fails
