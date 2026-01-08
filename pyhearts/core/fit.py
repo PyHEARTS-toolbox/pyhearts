@@ -13,7 +13,7 @@ from typing import Any, Literal, Optional, Tuple
 import numpy as np
 import pandas as pd
 from pyhearts.config import ProcessCycleConfig
-from pyhearts.feature import calc_hrv_metrics
+from pyhearts.feature import calc_hrv_metrics, compute_beat_to_beat_variability
 from pyhearts.processing import (
     epoch_ecg,
     initialize_output_dict,
@@ -86,6 +86,8 @@ class PyHEARTS:
         self.previous_gauss_features: Optional[dict] = None
         self.sig_corrected_dict: dict = {}
         self.hrv_metrics: dict = {}
+        self.variability_metrics: dict = {}
+        self.variability_metrics: dict = {}
     ######     
     # ===== Repro/metadata helpers (private) =====
     def _git_info(self) -> dict:
@@ -370,6 +372,8 @@ class PyHEARTS:
         self.sig_corrected_dict = {}
         self.output_dict = None
         self.hrv_metrics = {}
+        self.variability_metrics = {}
+        self.variability_metrics = {}
 
         try:
             # Check signal quality before processing
@@ -569,6 +573,11 @@ class PyHEARTS:
                 "rdsm",
                 "sharpness",
 
+                # Slope features
+                "max_upslope_mv_per_s",
+                "max_downslope_mv_per_s",
+                "slope_asymmetry",
+
                 # Area under the wave
                 "voltage_integral_uv_ms",
             ]
@@ -581,6 +590,10 @@ class PyHEARTS:
                 "QT_interval_ms",
                 "PP_interval_ms",
                 "RR_interval_ms",
+                # QTc (rate-corrected QT) calculations
+                "QTc_Bazett_ms",
+                "QTc_Fridericia_ms",
+                "QTc_Framingham_ms",
             ]
             
             pairwise_diff_keys = [
@@ -676,6 +689,14 @@ class PyHEARTS:
                 p_dict_values = self.output_dict["P_global_center_idx"][:min(5, len(self.output_dict["P_global_center_idx"]))]
                 p_df_values = self.output_df["P_global_center_idx"].head(5).values if "P_global_center_idx" in self.output_df.columns else None
                 print(f"[DEBUG] After DataFrame conversion: dict values={p_dict_values}, df values={p_df_values}")
+            
+            # Compute beat-to-beat variability metrics
+            if len(self.output_df) > 0:
+                try:
+                    self.compute_variability_metrics()
+                except Exception as e:
+                    logging.warning(f"Error computing variability metrics: {e}")
+                    self.variability_metrics = {}
     
             return self.output_df, self.epochs_df #output_df, epochs_df = analyzer.analyze_ecg(signal) return both for accessible unpacking
 
@@ -721,6 +742,9 @@ class PyHEARTS:
         - SDNN: standard deviation of NN intervals
         - RMSSD: root mean square of successive differences
         - NN50: count of interval pairs differing by >50 ms
+        - pNN50: percentage of successive differences >50 ms
+        - SD1: Short-term HRV from Poincaré plot (perpendicular to line of identity)
+        - SD2: Long-term HRV from Poincaré plot (along line of identity)
     
         Returns
         -------
@@ -743,12 +767,15 @@ class PyHEARTS:
                 self.hrv_metrics = {}
                 return
 
-            average_heart_rate, sdnn, rmssd, nn50 = calc_hrv_metrics(clean_rr_intervals)
+            average_heart_rate, sdnn, rmssd, nn50, pnn50, sd1, sd2 = calc_hrv_metrics(clean_rr_intervals)
             self.hrv_metrics = {
                 "average_heart_rate": average_heart_rate,
                 "sdnn": sdnn,
                 "rmssd": rmssd,
                 "nn50": nn50,
+                "pnn50": pnn50,
+                "sd1": sd1,
+                "sd2": sd2,
             }
 
         except ValueError as ve:
@@ -758,6 +785,72 @@ class PyHEARTS:
             logging.error(f"Unexpected error in compute_hrv_metrics: {e}")
             self.hrv_metrics = {}
     
+    def compute_variability_metrics(self, priority_features: Optional[List[str]] = None):
+        """
+        Compute beat-to-beat variability metrics for key morphological features.
+    
+        Computes variability statistics (std, CV, IQR, MAD, range) across cycles for
+        priority features such as QT intervals, QRS duration, wave amplitudes, etc.
+    
+        Parameters
+        ----------
+        priority_features : List[str], optional
+            List of feature names to compute variability for.
+            If None, uses default priority features (QT, QRS, PR, RR intervals,
+            QTc values, wave amplitudes, etc.)
+    
+        Returns
+        -------
+        None
+            Updates `self.variability_metrics` with computed values, or an empty dict
+            if computation fails.
+        """
+        try:
+            if self.output_dict is None:
+                raise ValueError("output_dict is missing. Cannot compute variability metrics.")
+            
+            self.variability_metrics = compute_beat_to_beat_variability(
+                self.output_dict,
+                priority_features=priority_features
+            )
+            
+            if self.verbose and len(self.variability_metrics) > 0:
+                logging.info(f"Computed variability metrics for {len(self.variability_metrics) // 5} features")
+        
+        except Exception as e:
+            logging.error(f"Error computing variability metrics: {e}")
+            self.variability_metrics = {}
+    
+    def save_variability_metrics(self, file_id: str, results_dir: str):
+        """
+        Save computed variability metrics to a CSV file.
+    
+        Parameters
+        ----------
+        file_id : str
+            Identifier for the ECG recording (used in filename).
+        results_dir : str
+            Directory where the CSV will be saved.
+    
+        Returns
+        -------
+        None
+            Writes `{file_id}_variability_metrics.csv` to the results directory.
+        """
+        try:
+            if not self.variability_metrics:
+                logging.info(f"Variability metrics are empty for file {file_id}. Nothing to save.")
+                return
+
+            variability_df = pd.DataFrame([self.variability_metrics])
+            output_path = f"{results_dir}/{file_id}_variability_metrics.csv"
+            variability_df.to_csv(output_path, index=False)
+            self._save_metadata(file_id, results_dir)
+            logging.info(f"Variability metrics for {file_id} saved to {output_path}.")
+
+        except Exception as e:
+            logging.error(f"Unexpected error in save_variability_metrics for {file_id}: {e}")
+
     def save_hrv_metrics(self, file_id: str, results_dir: str):
         """
         Save computed HRV metrics to a CSV file.

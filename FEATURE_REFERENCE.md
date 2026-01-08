@@ -2,7 +2,7 @@
 
 Complete list of all features extracted by PyHEARTS, including definitions and calculation methods.
 
-**Total Features**: 163 per cardiac cycle + 4 HRV metrics = **167 total features**
+**Total Features**: 181 per cardiac cycle + 7 HRV metrics + ~45-70 variability metrics = **~240 total features**
 
 ---
 
@@ -20,7 +20,7 @@ Complete list of all features extracted by PyHEARTS, including definitions and c
 
 Each feature is extracted for all 5 ECG waves: **P, Q, R, S, T**
 
-**Total per wave**: 30 features × 5 waves = **150 features**
+**Total per wave**: 33 features × 5 waves = **165 features**
 
 ### 1. Global Indices (Absolute Sample Indices)
 
@@ -241,6 +241,30 @@ Morphological characteristics describing wave shape.
 - **Configuration**: Controlled by `cfg.sharp_stat` and `cfg.sharp_amp_norm`
 - **Note**: Higher values indicate sharper, more rapid transitions
 
+#### `{Wave}_max_upslope_mv_per_s`
+- **Definition**: Maximum positive slope in the rising phase (onset to peak)
+- **Calculation**: `max(diff(rising_segment) / dt)` where `rising_segment = signal[le_idx:center_idx+1]`
+- **Units**: Millivolts per second (mV/s)
+- **Interpretation**: Maximum rate of depolarization (for P, R, T) or repolarization (for Q, S)
+- **Clinical Relevance**: Higher values indicate faster activation/repolarization, associated with conduction velocity
+
+#### `{Wave}_max_downslope_mv_per_s`
+- **Definition**: Maximum negative slope in the falling phase (peak to offset)
+- **Calculation**: `min(diff(decay_segment) / dt)` where `decay_segment = signal[center_idx:ri_idx+1]`
+- **Units**: Millivolts per second (mV/s)
+- **Interpretation**: Maximum rate of repolarization (for P, R, T) or depolarization (for Q, S)
+- **Clinical Relevance**: Higher magnitude values indicate faster repolarization/depolarization
+
+#### `{Wave}_slope_asymmetry`
+- **Definition**: Ratio of maximum upslope to maximum downslope magnitudes
+- **Calculation**: `abs(max_upslope) / abs(max_downslope)`
+- **Units**: Dimensionless ratio
+- **Interpretation**:
+  - `slope_asymmetry > 1`: Faster rise than decay (asymmetric activation)
+  - `slope_asymmetry < 1`: Faster decay than rise (asymmetric repolarization)
+  - `slope_asymmetry ≈ 1`: Symmetric slopes
+- **Clinical Relevance**: Asymmetry in T-wave slopes is associated with repolarization heterogeneity and arrhythmia risk
+
 ---
 
 ### 8. Voltage Integral
@@ -260,7 +284,7 @@ Morphological characteristics describing wave shape.
 
 Timing intervals between different waves or wave boundaries.
 
-**Total**: 8 interval features
+**Total**: 11 interval features (8 basic + 3 QTc)
 
 ### 1. PR Interval
 
@@ -343,6 +367,46 @@ Timing intervals between different waves or wave boundaries.
 
 ---
 
+### 9. QTc (Rate-Corrected QT Interval)
+
+The QT interval varies with heart rate, so QTc (corrected QT) standardizes it to a common rate (typically 60 bpm) for clinical interpretation. PyHEARTS provides three correction formulas.
+
+#### `QTc_Bazett_ms`
+- **Definition**: QT interval corrected using Bazett's formula
+- **Calculation**: `QT_ms / √(RR_ms / 1000)`
+- **Units**: Milliseconds (ms)
+- **Normal Range**: <440ms (males), <460ms (females)
+- **Clinical Significance**: Most commonly used formula in clinical practice
+- **Limitations**: Less accurate at very high (>100 bpm) or very low (<50 bpm) heart rates
+- **Note**: Returns `NaN` if QT or RR interval is missing or invalid
+
+#### `QTc_Fridericia_ms`
+- **Definition**: QT interval corrected using Fridericia's formula
+- **Calculation**: `QT_ms / (RR_ms / 1000)^(1/3)`
+- **Units**: Milliseconds (ms)
+- **Normal Range**: Similar to Bazett (<440-460ms)
+- **Clinical Significance**: Often more accurate than Bazett at high heart rates
+- **Advantages**: Uses cube root instead of square root, preferred in some research settings
+- **Note**: Returns `NaN` if QT or RR interval is missing or invalid
+
+#### `QTc_Framingham_ms`
+- **Definition**: QT interval corrected using Framingham formula
+- **Calculation**: `QT_ms + 0.154 × (1000 - RR_ms)`
+- **Units**: Milliseconds (ms)
+- **Normal Range**: Similar to Bazett (<440-460ms)
+- **Clinical Significance**: Linear correction formula, alternative to power-based formulas
+- **Advantages**: Simple additive approach
+- **Note**: Returns `NaN` if QT or RR interval is missing or invalid
+
+**Clinical Relevance of Prolonged QTc**:
+- Increased risk of arrhythmias (especially Torsades de Pointes)
+- Drug-induced QT prolongation
+- Congenital long QT syndrome
+- Electrolyte imbalances
+- Myocardial ischemia
+
+---
+
 ## Pairwise Voltage Differences
 
 Voltage differences between specific wave pairs, useful for morphology analysis.
@@ -421,7 +485,7 @@ Measures of how well the Gaussian model fits the actual ECG signal.
 
 These are computed separately from the per-cycle features, using the RR interval series.
 
-**Total**: 4 HRV metrics (computed via `compute_hrv_metrics()`)
+**Total**: 7 HRV metrics (computed via `compute_hrv_metrics()`)
 
 ### 1. Average Heart Rate
 
@@ -465,7 +529,124 @@ These are computed separately from the per-cycle features, using the RR interval
 - **Clinical Significance**: Count of significant beat-to-beat variations
 - **Note**: Related to pNN50 (percentage), which would be `NN50 / (N-1) * 100`
 
+### 5. pNN50
+
+#### `pnn50`
+- **Definition**: Percentage of successive RR interval differences greater than 50 ms
+- **Calculation**: `(NN50 / (N-1)) * 100` where N is the number of RR intervals
+- **Units**: Percentage (float, 0-100)
+- **Requirements**: Requires ≥2 RR intervals
+- **Clinical Significance**: Short-term HRV measure, reflects parasympathetic activity
+- **Interpretation**: Higher values indicate greater beat-to-beat variability
+- **Note**: More sensitive than NN50 as it normalizes by the number of intervals
+
+### 6. SD1 (Poincaré Plot)
+
+#### `sd1`
+- **Definition**: Short-term HRV from Poincaré plot (perpendicular to line of identity)
+- **Calculation**: `RMSSD / √2`
+- **Units**: Milliseconds (ms)
+- **Requirements**: Requires ≥2 RR intervals
+- **Clinical Significance**: Reflects short-term variability and parasympathetic activity
+- **Interpretation**: Higher values indicate greater short-term HRV
+- **Note**: SD1 is mathematically related to RMSSD: SD1 = RMSSD / √2
+
+### 7. SD2 (Poincaré Plot)
+
+#### `sd2`
+- **Definition**: Long-term HRV from Poincaré plot (along line of identity)
+- **Calculation**: `√(2 × SDNN² - SD1²)`
+- **Units**: Milliseconds (ms)
+- **Requirements**: Requires ≥2 RR intervals
+- **Clinical Significance**: Reflects long-term variability and overall HRV
+- **Interpretation**: Higher values indicate greater long-term HRV
+- **Note**: SD2 captures variability along the line of identity in the Poincaré plot
+
 **Computation**: Called via `PyHEARTS.compute_hrv_metrics()` after `analyze_ecg()`
+
+**Poincaré Plot Notes**:
+- The Poincaré plot is a scatter plot of RR(n) vs RR(n+1)
+- SD1 measures width of the cloud (perpendicular to line of identity) = short-term variability
+- SD2 measures length of the cloud (along line of identity) = long-term variability
+- SD1/SD2 ratio provides additional insight into the balance of short-term vs long-term variability
+
+---
+
+## Beat-to-Beat Variability Metrics
+
+These metrics quantify the variability of morphological features across cardiac cycles, computed from the per-cycle feature series.
+
+**Total**: Variable (5 metrics × N priority features, typically 45-70 metrics depending on detected features)
+
+**Computation**: Called automatically after `analyze_ecg()` via `PyHEARTS.compute_variability_metrics()`, or manually via `PyHEARTS.compute_variability_metrics(priority_features=...)`
+
+### Default Priority Features
+
+Variability is computed for the following features by default:
+- **Intervals**: `QT_interval_ms`, `QRS_interval_ms`, `PR_interval_ms`, `RR_interval_ms`
+- **QTc**: `QTc_Bazett_ms`, `QTc_Fridericia_ms`
+- **Wave Amplitudes**: `R_gauss_height`, `P_gauss_height`, `T_gauss_height`
+- **Wave Durations**: `R_duration_ms`, `P_duration_ms`, `T_duration_ms`
+- **Segments**: `ST_segment_ms`
+
+### Variability Metrics (per feature)
+
+For each priority feature, the following 5 metrics are computed:
+
+#### `{Feature}_std`
+- **Definition**: Standard deviation of the feature across cycles
+- **Calculation**: `std(feature_series, ddof=1)` (sample standard deviation)
+- **Units**: Same as the feature (ms for intervals, mV for amplitudes, etc.)
+- **Interpretation**: Higher values indicate greater beat-to-beat variability
+- **Clinical Significance**: Increased variability in QT intervals is associated with arrhythmia risk
+
+#### `{Feature}_cv`
+- **Definition**: Coefficient of variation (normalized variability)
+- **Calculation**: `std / abs(mean)`
+- **Units**: Dimensionless ratio
+- **Interpretation**: 
+  - CV < 0.1: Low variability
+  - CV 0.1-0.3: Moderate variability
+  - CV > 0.3: High variability
+- **Clinical Significance**: Normalizes variability by mean, useful for comparing features with different scales
+
+#### `{Feature}_iqr`
+- **Definition**: Interquartile range (75th percentile - 25th percentile)
+- **Calculation**: `percentile(feature_series, 75) - percentile(feature_series, 25)`
+- **Units**: Same as the feature
+- **Interpretation**: Robust measure of spread, less sensitive to outliers than range
+- **Clinical Significance**: IQR provides a robust measure of variability that is less affected by extreme values
+
+#### `{Feature}_mad`
+- **Definition**: Median absolute deviation (robust measure of variability)
+- **Calculation**: `1.4826 × median(abs(feature_series - median(feature_series)))`
+- **Units**: Same as the feature
+- **Interpretation**: Robust alternative to standard deviation, resistant to outliers
+- **Clinical Significance**: MAD is less sensitive to outliers than standard deviation, useful for noisy signals
+
+#### `{Feature}_range`
+- **Definition**: Range (maximum - minimum)
+- **Calculation**: `max(feature_series) - min(feature_series)`
+- **Units**: Same as the feature
+- **Interpretation**: Total spread of values across cycles
+- **Clinical Significance**: Range indicates the full extent of beat-to-beat variation
+
+**Requirements**: Requires ≥2 valid (non-NaN) values for the feature across cycles. Returns `NaN` if insufficient data.
+
+**Access**: Variability metrics are stored in `PyHEARTS.variability_metrics` dictionary after calling `analyze_ecg()`.
+
+**Example**:
+```python
+from pyhearts import PyHEARTS
+
+hearts = PyHEARTS(sampling_rate=250.0, species='human')
+output_df, epochs_df = hearts.analyze_ecg(ecg_signal)
+
+# Variability metrics computed automatically
+qt_std = hearts.variability_metrics.get('QT_interval_ms_std')
+qt_cv = hearts.variability_metrics.get('QT_interval_ms_cv')
+r_height_std = hearts.variability_metrics.get('R_gauss_height_std')
+```
 
 ---
 
@@ -479,10 +660,10 @@ These are computed separately from the per-cycle features, using the RR interval
 4. **Gaussian Parameters** (6): `gauss_center`, `gauss_height`, `gauss_stdev_samples`, `gauss_stdev_ms`, `gauss_fwhm_samples`, `gauss_fwhm_ms`
 5. **FWHM Boundaries** (6): `fwhm_le_idx`, `fwhm_ri_idx`, `fwhm_le_ms`, `fwhm_ri_ms`, `fwhm_global_le_idx`, `fwhm_global_ri_idx`
 6. **Amplitudes** (3): `center_voltage`, `le_voltage`, `ri_voltage`
-7. **Morphology** (5): `duration_ms`, `rise_ms`, `decay_ms`, `rdsm`, `sharpness`
+7. **Morphology** (8): `duration_ms`, `rise_ms`, `decay_ms`, `rdsm`, `sharpness`, `max_upslope_mv_per_s`, `max_downslope_mv_per_s`, `slope_asymmetry`
 8. **Integral** (1): `voltage_integral_uv_ms`
 
-### Interval Features (8 features)
+### Interval Features (11 features)
 
 1. `PR_interval_ms`
 2. `PR_segment_ms`
@@ -492,6 +673,9 @@ These are computed separately from the per-cycle features, using the RR interval
 6. `QT_interval_ms`
 7. `RR_interval_ms`
 8. `PP_interval_ms`
+9. `QTc_Bazett_ms` (rate-corrected QT using Bazett's formula)
+10. `QTc_Fridericia_ms` (rate-corrected QT using Fridericia's formula)
+11. `QTc_Framingham_ms` (rate-corrected QT using Framingham formula)
 
 ### Pairwise Differences (3 features)
 
@@ -504,20 +688,40 @@ These are computed separately from the per-cycle features, using the RR interval
 1. `r_squared`
 2. `rmse`
 
-### HRV Metrics (4 features, computed separately)
+### HRV Metrics (7 features, computed separately)
 
 1. `average_heart_rate`
 2. `sdnn`
 3. `rmssd`
 4. `nn50`
+5. `pnn50`
+6. `sd1`
+7. `sd2`
+
+### Variability Metrics (~45-70 features, computed separately)
+
+For each priority feature, 5 metrics are computed:
+- `{Feature}_std`: Standard deviation
+- `{Feature}_cv`: Coefficient of variation
+- `{Feature}_iqr`: Interquartile range
+- `{Feature}_mad`: Median absolute deviation
+- `{Feature}_range`: Range
+
+Default priority features (9-14 features, depending on detection):
+- Intervals: `QT_interval_ms`, `QRS_interval_ms`, `PR_interval_ms`, `RR_interval_ms`
+- QTc: `QTc_Bazett_ms`, `QTc_Fridericia_ms`
+- Amplitudes: `R_gauss_height`, `P_gauss_height`, `T_gauss_height`
+- Durations: `R_duration_ms`, `P_duration_ms`, `T_duration_ms`
+- Segments: `ST_segment_ms`
 
 ---
 
 ## Total Feature Count
 
-- **Per-cycle features**: 150 (morphological) + 8 (intervals) + 3 (pairwise) + 2 (fit quality) = **163 features per cycle**
-- **HRV metrics**: 4 features (computed once per recording)
-- **Grand total**: **167 features** per ECG recording
+- **Per-cycle features**: 165 (morphological) + 11 (intervals) + 3 (pairwise) + 2 (fit quality) = **181 features per cycle**
+- **HRV metrics**: 7 features (computed once per recording)
+- **Variability metrics**: ~45-70 features (5 metrics × 9-14 priority features, computed once per recording)
+- **Grand total**: **~240 features** per ECG recording
 
 ---
 
@@ -564,6 +768,9 @@ pr_intervals = output_df['PR_interval_ms']  # PR intervals
 # HRV metrics (computed separately)
 hearts.compute_hrv_metrics()
 print(hearts.hrv_metrics)  # Dictionary with HRV metrics
+
+# Variability metrics (computed automatically)
+print(hearts.variability_metrics)  # Dictionary with variability metrics
 ```
 
 ---
@@ -574,5 +781,6 @@ print(hearts.hrv_metrics)  # Dictionary with HRV metrics
 - Gaussian fitting: `pyhearts/processing/gaussian.py`
 - Interval calculation: `pyhearts/feature/intervals.py`
 - HRV computation: `pyhearts/feature/hrv.py`
+- Variability computation: `pyhearts/feature/variability.py`
 - Main processing: `pyhearts/processing/processcycle.py`
 

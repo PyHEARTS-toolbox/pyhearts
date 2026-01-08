@@ -320,6 +320,95 @@ def calc_sharpness_derivative(
     return float(val) if np.isfinite(val) else np.nan
 
 
+def calc_slope_features(
+    signal: np.ndarray,
+    left_idx: int,
+    center_idx: int,
+    right_idx: int,
+    *,
+    fs: float,
+) -> Tuple[float, float, float]:
+    """
+    Compute slope features for a wave segment: max upslope, max downslope, and slope asymmetry.
+    
+    Parameters
+    ----------
+    signal : np.ndarray
+        Input 1D ECG signal array.
+    left_idx : int
+        Left edge (onset) index of the wave.
+    center_idx : int
+        Center (peak) index of the wave.
+    right_idx : int
+        Right edge (offset) index of the wave.
+    fs : float
+        Sampling rate in Hz.
+    
+    Returns
+    -------
+    Tuple[float, float, float]
+        (max_upslope_mv_per_s, max_downslope_mv_per_s, slope_asymmetry)
+        - max_upslope_mv_per_s: Maximum positive slope in rising phase (mV/s)
+        - max_downslope_mv_per_s: Maximum negative slope in falling phase (mV/s)
+        - slope_asymmetry: Ratio of upslope to downslope magnitudes (dimensionless)
+        Returns (np.nan, np.nan, np.nan) if inputs are invalid.
+    
+    Notes
+    -----
+    - For negative peaks (Q, S), upslope is the rising phase toward the peak,
+      and downslope is the falling phase away from the peak.
+    - Slope asymmetry = abs(max_upslope) / abs(max_downslope)
+      - >1: Faster rise than decay
+      - <1: Faster decay than rise
+      - =1: Symmetric slopes
+    """
+    # Guardrails
+    if (left_idx is None or center_idx is None or right_idx is None or
+        left_idx >= center_idx or center_idx >= right_idx):
+        return np.nan, np.nan, np.nan
+    
+    if fs <= 0:
+        return np.nan, np.nan, np.nan
+    
+    # Ensure indices are within bounds
+    n = len(signal)
+    left_idx = max(0, min(left_idx, n - 1))
+    center_idx = max(0, min(center_idx, n - 1))
+    right_idx = max(0, min(right_idx, n - 1))
+    
+    if left_idx >= center_idx or center_idx >= right_idx:
+        return np.nan, np.nan, np.nan
+    
+    dt = 1.0 / float(fs)
+    
+    # Extract rising phase (onset to peak)
+    rise_segment = signal[left_idx:center_idx + 1]
+    if rise_segment.size < 2:
+        return np.nan, np.nan, np.nan
+    
+    # Compute derivative (slope) for rising phase
+    rise_diff = np.diff(rise_segment) / dt
+    max_upslope = float(np.max(rise_diff)) if len(rise_diff) > 0 else np.nan
+    
+    # Extract falling phase (peak to offset)
+    decay_segment = signal[center_idx:right_idx + 1]
+    if decay_segment.size < 2:
+        return np.nan, np.nan, np.nan
+    
+    # Compute derivative (slope) for falling phase
+    decay_diff = np.diff(decay_segment) / dt
+    max_downslope = float(np.min(decay_diff)) if len(decay_diff) > 0 else np.nan
+    
+    # Compute slope asymmetry
+    if (np.isfinite(max_upslope) and np.isfinite(max_downslope) and
+        abs(max_downslope) > 1e-6):
+        slope_asymmetry = abs(max_upslope) / abs(max_downslope)
+    else:
+        slope_asymmetry = np.nan
+    
+    return max_upslope, max_downslope, slope_asymmetry
+
+
 
 
 def estimate_local_baseline(
@@ -1029,18 +1118,24 @@ def extract_shape_features(
         sharpness = calc_sharpness_derivative(
             signal, left_idx, right_idx, fs=sampling_rate, cfg=cfg
         )
+        
+        # Compute slope features
+        max_upslope, max_downslope, slope_asymmetry = calc_slope_features(
+            signal, left_idx, center_idx, right_idx, fs=sampling_rate
+        )
 
         to_ms = lambda s: (s / sampling_rate) * 1000.0
         shape_features_list.append(
             [to_ms(duration_samples), float(right_idx), float(left_idx),
-             to_ms(rise_samples), to_ms(decay_samples), float(rdsm), float(sharpness)]
+             to_ms(rise_samples), to_ms(decay_samples), float(rdsm), float(sharpness),
+             float(max_upslope), float(max_downslope), float(slope_asymmetry)]
         )
         valid_labels.append(label)
         bounds_by_wave[label] = (left_idx, right_idx)
 
     # pack arrays
     shape_features_array = (
-        np.asarray(shape_features_list, dtype=float) if shape_features_list else np.empty((0, 7))
+        np.asarray(shape_features_list, dtype=float) if shape_features_list else np.empty((0, 10))
     )
 
     # per-component dict
@@ -1056,6 +1151,9 @@ def extract_shape_features(
             "decay_ms": float(shape_features_array[row_idx, 4]),
             "rdsm": float(shape_features_array[row_idx, 5]),
             "sharpness": float(shape_features_array[row_idx, 6]),
+            "max_upslope_mv_per_s": float(shape_features_array[row_idx, 7]),
+            "max_downslope_mv_per_s": float(shape_features_array[row_idx, 8]),
+            "slope_asymmetry": float(shape_features_array[row_idx, 9]),
             "voltage_integral_uv_ms": float(
                 np.nan if label not in bounds_by_wave else
                 compute_voltage_integrals(signal, {label: bounds_by_wave[label]}, sampling_rate)[f"{label}_voltage_integral"]

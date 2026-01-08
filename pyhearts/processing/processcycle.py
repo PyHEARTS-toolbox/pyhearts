@@ -2461,10 +2461,11 @@ def process_cycle(
     
     except Exception as e:
         print(f"[ERROR] [Cycle {cycle_idx}]:  extract_shape_features() failed: {e}")
-        shape = {"valid_components": [], "per_component": {}, "global_metrics": {}, "array": np.empty((0, 7))}
+        shape = {"valid_components": [], "per_component": {}, "global_metrics": {}, "array": np.empty((0, 10))}
         valid_components = []
     
-    shape_feature_keys = ["duration_ms", "ri_idx", "le_idx", "rise_ms", "decay_ms", "rdsm", "sharpness"]
+    shape_feature_keys = ["duration_ms", "ri_idx", "le_idx", "rise_ms", "decay_ms", "rdsm", "sharpness",
+                          "max_upslope_mv_per_s", "max_downslope_mv_per_s", "slope_asymmetry"]
     
     # Add shape features to each component in peak_data
     for comp in valid_components:
@@ -2802,6 +2803,23 @@ def process_cycle(
     # Write into preallocated arrays/lists (NOT setdefault to dict)
     output_dict["RR_interval_ms"][cycle_idx] = rr_val_ms
     output_dict["PP_interval_ms"][cycle_idx] = pp_val_ms
+
+    # Calculate QTc values (requires both QT and RR intervals)
+    qt_ms = interval_results.get('QT_interval_ms', np.nan)
+    if np.isfinite(qt_ms) and np.isfinite(rr_val_ms) and rr_val_ms > 0:
+        from pyhearts.feature.intervals import calc_qtc_all_formulas
+        qtc_results = calc_qtc_all_formulas(qt_ms, rr_val_ms)
+        for qtc_name, qtc_value in qtc_results.items():
+            if qtc_name in output_dict:
+                output_dict[qtc_name][cycle_idx] = qtc_value
+            else:
+                if cycle_idx < 20 or cycle_idx % 10 == 0:
+                    logging.warning(f"[QTC_MISSING_KEY] Cycle {cycle_idx}: QTc key {qtc_name} not in output_dict")
+    else:
+        # Set QTc to NaN if QT or RR is missing
+        for qtc_name in ['QTc_Bazett_ms', 'QTc_Fridericia_ms', 'QTc_Framingham_ms']:
+            if qtc_name in output_dict:
+                output_dict[qtc_name][cycle_idx] = np.nan
 
     # ==============================================================================
     # PHYSIOLOGICAL VALIDATION
