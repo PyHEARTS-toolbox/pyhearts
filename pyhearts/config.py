@@ -59,8 +59,8 @@ class ProcessCycleConfig:
     p_use_fixed_window_method: bool = False  # Use fixed-window P wave detection (1-60 Hz filter, fixed search window, derivative zero-crossing)
     p_use_improved_method: bool = False  # Use improved P wave detection (deprecated in favor of derivative-validated method)
     p_use_derivative_validated_method: bool = False  # Use derivative-validated P wave detection (derivative-based with comprehensive validation)
-    p_enable_distance_validation: bool = True  # Enable distance-based validation (P-R, P-Q distances). Set False to match ecgpuwave style
-    p_enable_morphology_validation: bool = True  # Enable morphology-based validation (duration, sharpness). Set False to match ecgpuwave style
+    p_enable_distance_validation: bool = False  # Enable distance-based validation (P-R, P-Q distances). Disabled by default to support abnormal cycles
+    p_enable_morphology_validation: bool = False  # Enable morphology-based validation (duration, sharpness). Disabled by default to support abnormal cycles
     
     # ---- Amplitude ratios to avoid noise ---
     # Increased P wave minimum ratio from 0.02 to 0.03 to reduce false positives (low precision issue)
@@ -313,8 +313,8 @@ class ProcessCycleConfig:
             p_use_fixed_window_method=False,
             p_use_improved_method=False,
             p_use_derivative_validated_method=True,
-            p_enable_distance_validation=False,  # ecgpuwave has no distance checks
-            p_enable_morphology_validation=False,  # ecgpuwave only checks duration < 180ms
+            p_enable_distance_validation=False,  # Disabled to support abnormal cycles
+            p_enable_morphology_validation=False,  # Disabled to support abnormal cycles
             version="v2.0-human-ecgpuwave-style",
         )
 
