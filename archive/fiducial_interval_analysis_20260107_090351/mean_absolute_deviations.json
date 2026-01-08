@@ -1,0 +1,20 @@
+{
+  "R": {
+    "ph_mad": 17.17475346316878,
+    "ecg_mad": 16.4188200305232,
+    "ph_n": 68651,
+    "ecg_n": 76663
+  },
+  "P": {
+    "ph_mad": null,
+    "ecg_mad": null,
+    "ph_n": 0,
+    "ecg_n": 0
+  },
+  "T": {
+    "ph_mad": null,
+    "ecg_mad": null,
+    "ph_n": 0,
+    "ecg_n": 0
+  }
+}
