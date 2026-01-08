@@ -1,7 +1,7 @@
 """
 Improved QRS boundary detection using signal amplitude and derivative.
 
-This version uses a simpler, more direct approach to match ECGPUWAVE's QRS boundaries.
+This version uses a simpler, more direct approach to match established QRS boundary detection methods.
 """
 
 import numpy as np

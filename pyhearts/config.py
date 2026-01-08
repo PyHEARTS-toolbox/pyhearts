@@ -268,14 +268,15 @@ class ProcessCycleConfig:
     @classmethod
     def for_human(cls) -> "ProcessCycleConfig":
         """
-        Preset tuned for adult human physiology with ecgpuwave-style high sensitivity.
+        Preset tuned for adult human physiology with high-sensitivity detection settings.
         
-        Optimized for high detection rates (97%+ P waves, 85%+ T waves) matching ecgpuwave performance:
+        Optimized for high detection rates (97%+ P waves, 85%+ T waves) matching established
+        delineation software performance:
         - High amplitude ratio (2.0% of R peak) for P/T waves
-        - Very lenient SNR gate (0.5× MAD) - ecgpuwave has none
-        - No distance constraints (ecgpuwave style)
+        - Very lenient SNR gate (0.5× MAD) - established delineation methods typically have no SNR gate
+        - No distance constraints (lenient detection style)
         - Minimal morphology validation (duration only)
-        - 1-60 Hz bandpass filter matching ecgpuwave
+        - 1-60 Hz bandpass filter matching established methods
         
         This configuration prioritizes recall over precision, which is appropriate for
         interval analysis where more data points are needed.
@@ -284,14 +285,14 @@ class ProcessCycleConfig:
             cls(),
             detrend_window_ms=200,
             postQRS_refractory_window_ms=20,
-            # ecgpuwave uses 1/30 (3.3%) for P waves, we use 2.0% as a balance
-            amp_min_ratio={"P": 0.020, "T": 0.020, "Q": 0.015, "S": 0.015},  # 2.0% for P/T (ecgpuwave uses 3.3%)
-            # ecgpuwave has NO SNR gate, we use very lenient 0.5× MAD
-            snr_mad_multiplier={"P": 0.5, "T": 0.5},  # Very lenient (ecgpuwave has none)
+            # Established delineation methods use 1/30 (3.3%) for P waves, we use 2.0% as a balance
+            amp_min_ratio={"P": 0.020, "T": 0.020, "Q": 0.015, "S": 0.015},  # 2.0% for P/T (established methods use 3.3%)
+            # Established delineation methods have NO SNR gate, we use very lenient 0.5× MAD
+            snr_mad_multiplier={"P": 0.5, "T": 0.5},  # Very lenient (established methods typically have none)
             snr_exclusion_ms={"P": 0, "T": 10},
             snr_apply_savgol={"P": False, "T": True},
             rr_bounds_ms=(300, 1800),
-            shape_max_window_ms={"P": 200, "Q": 60, "R": 80, "S": 60, "T": 220},  # Wider P window like ecgpuwave
+            shape_max_window_ms={"P": 200, "Q": 60, "R": 80, "S": 60, "T": 220},  # Wider P window for high-sensitivity detection
             duration_min_ms=20,
             threshold_fraction=0.15,
             epoch_corr_thresh=0.68,
@@ -307,15 +308,15 @@ class ProcessCycleConfig:
             t_wave_offset_smoothing_window_ms=50,
             detect_u_wave=True,
             pwave_use_bandpass=True,
-            pwave_bandpass_low_hz=1.0,   # ecgpuwave uses 1-60 Hz
+            pwave_bandpass_low_hz=1.0,   # Established method uses 1-60 Hz
             pwave_bandpass_high_hz=60.0,
-            pwave_bandpass_order=2,      # ecgpuwave uses order 2
+            pwave_bandpass_order=2,      # Established method uses order 2
             p_use_fixed_window_method=False,
             p_use_improved_method=False,
             p_use_derivative_validated_method=True,
             p_enable_distance_validation=False,  # Disabled to support abnormal cycles
             p_enable_morphology_validation=False,  # Disabled to support abnormal cycles
-            version="v2.0-human-ecgpuwave-style",
+            version="v2.0-human-high-sensitivity",
         )
 
     @classmethod
@@ -323,7 +324,7 @@ class ProcessCycleConfig:
         """
         Alias for for_human() - maintained for backward compatibility.
         
-        The default for_human() preset now uses ecgpuwave-style high sensitivity settings.
+        The default for_human() preset now uses high-sensitivity detection settings.
         This method is kept for backward compatibility but simply returns for_human().
         """
         return cls.for_human()

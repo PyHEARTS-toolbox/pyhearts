@@ -646,11 +646,11 @@ def process_cycle(
                 print(f"[Cycle {cycle_idx}]: DEBUG - cycle_start_global calculated: {cycle_start_global}, one_cycle['index'].iloc[0]={one_cycle['index'].iloc[0] if 'index' in one_cycle.columns and len(one_cycle) > 0 else 'N/A'}, cycle_start_from_index={cycle_start_from_index if 'cycle_start_from_index' in locals() else 'N/A'}")
             
             # P wave detection methods use QRS onset - calculate actual QRS onset using derivative-based method
-            # ECGPUWAVE uses QRS1 which is QRS onset (start of QRS complex) detected via threshold crossing
+            # QRS onset detection method uses QRS1 which is QRS onset (start of QRS complex) detected via threshold crossing
             # Use derivative-based threshold crossing for accurate QRS onset detection
             qrs_onset_idx = None
             if r_center_idx is not None:
-                # Use derivative-based QRS onset detection (similar to ECGPUWAVE)
+                # Use derivative-based QRS onset detection (similar to established methods)
                 qrs_onset_idx = detect_qrs_onset_derivative(
                     signal=sig_detrended,
                     q_peak_idx=q_center_idx,
@@ -1449,7 +1449,7 @@ def process_cycle(
     # - Noise level checks (2 separate checks)
     # - Temporal constraints (P-R separation, duration limits)
     # - Zero-crossing based peak localization
-    # Morphology validation can be disabled via config to match ecgpuwave style
+    # Morphology validation can be disabled via config to match high-sensitivity detection style
     enable_morphology = getattr(cfg, "p_enable_morphology_validation", True) if cfg is not None else True
     skip_morphology_validation = not enable_morphology  # Skip if disabled in config
     

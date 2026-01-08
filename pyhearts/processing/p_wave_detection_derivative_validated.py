@@ -39,9 +39,9 @@ def bandpass_filter_p_wave(
 
 def estimate_noise_level(signal_segment: np.ndarray) -> float:
     """
-    Estimate noise level using ECGPUWAVE's method.
+    Estimate noise level using window-based noise estimation method.
     
-    ECGPUWAVE's noiselevel.m:
+    Window-based noise estimation method:
     - Divides signal into 5-sample windows
     - For each window, calculates (max - min)
     - Returns the average of these differences
@@ -51,7 +51,7 @@ def estimate_noise_level(signal_segment: np.ndarray) -> float:
     if len(signal_segment) == 0:
         return 0.0
     
-    # ECGPUWAVE method: divide into 5-sample windows, calculate (max-min) for each, average
+    # Window-based method: divide into 5-sample windows, calculate (max-min) for each, average
     inicio = 0
     iew = len(signal_segment)
     mnoise = 0.0
@@ -202,7 +202,7 @@ def detect_p_wave_derivative_validated(
     F = np.diff(Xpb)
     
     # Step 2: Define search window (200ms before QRS to 30ms before QRS)
-    # FIX 1: Add outer iterative window adjustment loop (ECGPUWAVE lines 14-127)
+    # FIX 1: Add outer iterative window adjustment loop for adaptive P-wave search window
     bwindp = 200e-3  # 200ms
     ewindp = 30e-3   # 30ms
     
@@ -213,11 +213,11 @@ def detect_p_wave_derivative_validated(
     if ibw_original <= 0:
         ibw_original = 1
     
-    # Outer loop: iteratively reduce window if P not found (ECGPUWAVE lines 124-127)
+        # Outer loop: iteratively reduce window if P not found (adaptive window reduction)
     iew = iew_original
     ibw = ibw_original
     outer_iteration = 0
-    max_outer_iterations = 6  # Reduced from 10 to 6 for performance (ECGPUWAVE typically uses fewer iterations)
+        max_outer_iterations = 6  # Reduced from 10 to 6 for performance (iterative window reduction typically uses fewer iterations)
     P_detected = False
     final_result = (None, None, None, None)
     
@@ -226,7 +226,7 @@ def detect_p_wave_derivative_validated(
             print(f"[Cycle {cycle_idx}]: OUTER LOOP iteration {outer_iteration}: ibw={ibw}, iew={iew}, window_size={iew-ibw} samples ({(iew-ibw)/sampling_rate*1000:.1f}ms)")
         
         if outer_iteration > 0:
-            # Reduce window by 50ms each iteration (ECGPUWAVE: iew=iew-round(50e-3*Fs))
+            # Reduce window by 50ms each iteration (adaptive window reduction: iew=iew-round(50e-3*Fs))
             iew = iew - int(round(50e-3 * sampling_rate))
             ibw = ibw - int(round(50e-3 * sampling_rate))
             if ibw <= 0:
@@ -239,19 +239,19 @@ def detect_p_wave_derivative_validated(
                 print(f"[Cycle {cycle_idx}]: OUTER LOOP: Reduced window to ibw={ibw}, iew={iew} ({(iew-ibw)/sampling_rate*1000:.1f}ms)")
         
         # Avoid overlap with previous T/P wave end
-        # FIX 5: Add iterative window adjustment loop like ECGPUWAVE (lines 14-22)
+        # FIX 5: Add iterative window adjustment loop for handling previous T/P wave overlap
         prevt = 0
         if previous_t_end_idx is not None and previous_t_end_idx > ibw:
             prevt = previous_t_end_idx
         if previous_p_end_idx is not None and previous_p_end_idx > ibw:
             prevt = max(prevt, previous_p_end_idx)
         
-        # Iterative adjustment for previous T/P overlap (matches ECGPUWAVE)
+        # Iterative adjustment for previous T/P overlap (adaptive window positioning)
         nofi = 1
         Pex = 1  # Track if P detection should continue
         Pp = None  # Track if P peak found
         
-        # ECGPUWAVE: while (nofi==1)&isempty(Pp)&(QRS1-ibw)/Fs<300e-3
+        # Adaptive window adjustment: while (nofi==1)&isempty(Pp)&(QRS1-ibw)/Fs<300e-3
         while nofi == 1 and Pp is None and (qrs_onset_idx - ibw) / sampling_rate < 300e-3:
             if cycle_idx == 0 or prevt == 0:
                 nofi = 0
@@ -420,7 +420,7 @@ def detect_p_wave_derivative_validated(
         
         # Step 12: Iterative adjustment if onset is too far from QRS (>240ms)
         # or overlaps with previous T/P end
-        # FIX 2: Use 20 SAMPLES not 20ms (ECGPUWAVE: ibw=ibw+20)
+        # FIX 2: Use 20 SAMPLES not 20ms (sample-based window adjustment: ibw=ibw+20)
         max_iterations = 10
         iteration = 0
         
@@ -432,7 +432,7 @@ def detect_p_wave_derivative_validated(
             if not too_far and not overlaps_prev:
                 break
             
-            # FIX 2: Adjust by 20 SAMPLES (not 20ms) - matches ECGPUWAVE
+            # FIX 2: Adjust by 20 SAMPLES (not 20ms) - uses sample-based window adjustment
             ibw = ibw + 20  # 20 samples, not 20ms!
             
             if ibw >= iew - int(round(20e-3 * sampling_rate)):
@@ -498,9 +498,9 @@ def detect_p_wave_derivative_validated(
             icero2 = imin - icero2 + 1
         
         # P peak is midpoint of zero-crossings
-        # FIX 3: Don't clip P peak to window bounds (ECGPUWAVE doesn't clip)
+        # FIX 3: Don't clip P peak to window bounds (peak detection method doesn't clip)
         Pp = int(round((icero1 + icero2) / 2.0))
-        # ECGPUWAVE doesn't clip Pp - only ensure it's within signal bounds
+        # Peak detection method doesn't clip Pp - only ensure it's within signal bounds
         if Pp < 0:
             Pp = 0
         elif Pp >= len(Xpb):
@@ -508,11 +508,11 @@ def detect_p_wave_derivative_validated(
         p_amplitude = float(Xpb[Pp])
         
         # Step 14: Noise level check before P onset
-        # ECGPUWAVE uses SAMPLE-BASED offsets, not time-based:
+        # Noise estimation uses SAMPLE-BASED offsets, not time-based:
         # inic=P1-40+1, fin=P1-5 (in samples, not milliseconds)
         # At 250Hz: 40 samples = 160ms, 5 samples = 20ms
-        inic = max(0, P1 - 40 + 1)  # 40 samples before P1 (matches ECGPUWAVE)
-        fin = max(0, P1 - 5)        # 5 samples before P1 (matches ECGPUWAVE)
+        inic = max(0, P1 - 40 + 1)  # 40 samples before P1 (sample-based noise estimation window)
+        fin = max(0, P1 - 5)        # 5 samples before P1 (sample-based noise estimation window)
         if fin <= 0:
             fin = 1
         if inic <= 0:
@@ -538,11 +538,11 @@ def detect_p_wave_derivative_validated(
             continue
         
         # Step 15: Find P wave offset
-        # FIX 4: Search to end of signal, not just QRS onset (ECGPUWAVE: F(imin:length(F)))
+        # FIX 4: Search to end of signal, not just QRS onset (offset detection: F(imin:length(F)))
         Kpe = 2.0
         umbral_offset = ymin / Kpe
         
-        # ECGPUWAVE: Faux=F(imin:length(F)) - search to end of signal
+        # Offset detection method: Faux=F(imin:length(F)) - search to end of signal
         F_forward_offset = F[imin:len(F)]  # Search to end of signal, not just QRS onset
         iumb_offset = thresholdcross(F_forward_offset, umbral_offset)
         
@@ -551,7 +551,7 @@ def detect_p_wave_derivative_validated(
         else:
             iumb_offset = imin + iumb_offset
         
-        # ECGPUWAVE: if iumb>=QRS1, find min in F(imin:QRS1)
+        # Offset detection: if iumb>=QRS1, find min in F(imin:QRS1)
         if iumb_offset >= qrs_onset_idx:
             # Find minimum between imin and QRS onset
             if imin < qrs_onset_idx:
@@ -563,7 +563,7 @@ def detect_p_wave_derivative_validated(
                     iumb_offset = qrs_onset_idx - 1
         
         P2 = iumb_offset
-        # ECGPUWAVE: if P2>=QRS1, P2=QRS1-1
+        # Offset boundary constraint: if P2>=QRS1, P2=QRS1-1
         if P2 >= qrs_onset_idx:
             P2 = qrs_onset_idx - 1
         

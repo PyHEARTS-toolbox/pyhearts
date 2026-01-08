@@ -285,7 +285,7 @@ def log_peak_result(
 
     # P wave validation: reject P waves too close to QRS
     # This prevents misclassifying inverted Q peaks as P waves when P is absent or too small
-    # Can be disabled via config to match ecgpuwave style (no distance checks)
+    # Can be disabled via config to match high-sensitivity detection style (no distance checks)
     if comp == "P" and r_center_idx is not None and sampling_rate is not None:
         # Check if distance validation is enabled (default True for backward compatibility)
         enable_distance_validation = getattr(cfg, "p_enable_distance_validation", True) if cfg is not None else True
@@ -296,7 +296,7 @@ def log_peak_result(
             
             # P waves should be at least 100ms before R peak (to avoid QRS complex and Q peaks)
             # Typical P-R intervals are 120-200ms, but can be as short as 100-120ms in some cases.
-            # ECGPUWAVE shows P-R intervals as low as 124ms, so we use 100ms to avoid rejecting valid P waves.
+            # Established delineation methods show P-R intervals as low as 124ms, so we use 100ms to avoid rejecting valid P waves.
             # If P is too close to R (< 100ms), it's likely a Q peak or QRS artifact, not a P wave.
             min_p_r_distance_ms = 100.0
             if p_r_distance_ms < min_p_r_distance_ms:
@@ -376,7 +376,7 @@ def log_peak_result(
         min_ratio = ratios.get(comp)
 
         if min_ratio is not None:
-            # Use config value for amplitude ratio (allows ecgpuwave-style higher thresholds)
+            # Use config value for amplitude ratio (allows high-sensitivity detection style higher thresholds)
             # For P and T waves, use the config value directly (no hardcoded override)
             # Absolute minimum check to avoid accepting noise
             abs_min = 0.001  # Very small absolute minimum (1 microvolt) to avoid accepting pure noise

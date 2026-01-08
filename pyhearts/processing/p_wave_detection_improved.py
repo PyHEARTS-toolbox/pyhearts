@@ -1,5 +1,5 @@
 """
-Improved P wave detection based on ECGPUWAVE algorithm.
+Improved P wave detection based on established delineation algorithm.
 
 Key improvements over fixed_window version:
 1. Better baseline estimation (15ms before QRS)
@@ -95,7 +95,7 @@ def detect_p_wave_improved(
     cycle_idx: Optional[int] = None,
 ) -> Tuple[Optional[int], Optional[float], Optional[int], Optional[int]]:
     """
-    Improved P wave detection based on ECGPUWAVE algorithm.
+    Improved P wave detection based on established delineation algorithm.
     
     Parameters
     ----------
@@ -223,14 +223,14 @@ def detect_p_wave_improved(
         r_amplitude_abs = None
         pkni = None
     
-    # Step 8: Combined validation check (matches ECGPUWAVE logic)
+    # Step 8: Combined validation check (derivative-based amplitude and slope validation)
     # Check if derivative extrema are too small relative to max derivative
     if max_derivative is None:
         max_derivative = float(np.max(np.abs(derivative))) if len(derivative) > 0 else 1.0
     
     slope_threshold = max_derivative / 100.0
     
-    # ECGPUWAVE validation: (ecgpbmax<=abs(Xpb(PKni)-base)/30) | 
+    # Derivative-based validation: (ecgpbmax<=abs(Xpb(PKni)-base)/30) | 
     # ((ymax<dermax/(100)&abs(ymin)<dermax/(100))&(ymax<abs(ymin)/1.5|ymax>abs(ymin)*1.5)) | 
     # (ymax<0 | ymin>0)
     

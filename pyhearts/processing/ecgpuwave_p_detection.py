@@ -1,7 +1,7 @@
 """
-ECGPUWave-style P wave detection.
+Derivative-based P wave detection with fixed search window.
 
-Implements the P wave detection algorithm from ECGPUWave:
+Implements P wave detection using bandpass filtering, derivative computation, and fixed search windows:
 1. Bandpass filter (1-60 Hz) to create ecgpb
 2. Compute derivative (dbuf) to emphasize slopes
 3. Fixed search window: 200ms before QRS to 30ms before QRS
@@ -16,7 +16,7 @@ from typing import Optional, Tuple
 import numpy as np
 from scipy.signal import butter, filtfilt
 
-__all__ = ["detect_p_wave_ecgpuwave_style"]
+__all__ = ["detect_p_wave_ecgpuwave_style"]  # Kept for backward compatibility
 
 
 def bandpass_filter_ecgpuwave(
@@ -27,7 +27,7 @@ def bandpass_filter_ecgpuwave(
     order: int = 2,
 ) -> np.ndarray:
     """
-    Apply ECGPUWave-style bandpass filter (1-60 Hz).
+    Apply bandpass filter (1-60 Hz) for P-wave enhancement.
     
     Parameters
     ----------
@@ -75,7 +75,7 @@ def detect_p_wave_ecgpuwave_style(
     cycle_idx: Optional[int] = None,
 ) -> Tuple[Optional[int], Optional[float], Optional[int], Optional[int]]:
     """
-    Detect P wave using ECGPUWave-style algorithm.
+    Detect P wave using derivative-based algorithm with fixed search window.
     
     Steps:
     1. Bandpass filter (1-60 Hz) to create ecgpb
@@ -91,7 +91,7 @@ def detect_p_wave_ecgpuwave_style(
     signal : np.ndarray
         ECG signal (detrended).
     qrs_onset_idx : int
-        QRS onset index (iqbeg in ECGPUWave).
+        QRS onset index (start of QRS complex).
     r_peak_idx : int, optional
         R peak index (for amplitude validation).
     r_amplitude : float, optional
@@ -117,7 +117,7 @@ def detect_p_wave_ecgpuwave_style(
         return None, None, None, None
     
     # Step 1: Signal preprocessing
-    # Bandpass filter (1-60 Hz) - ECGPUWave uses ~1 Hz high-pass, 60 Hz low-pass
+    # Bandpass filter (1-60 Hz) - ~1 Hz high-pass, 60 Hz low-pass for P-wave enhancement
     ecgpb = bandpass_filter_ecgpuwave(signal, sampling_rate, lowcut=1.0, highcut=60.0, order=2)
     
     # Compute derivative (dbuf) to emphasize slopes
@@ -188,7 +188,7 @@ def detect_p_wave_ecgpuwave_style(
     max_amplitude_ecgpb = float(np.max(np.abs(search_window_ecgpb)))
     
     if r_amplitude is not None and r_amplitude > 0:
-        min_amplitude_ratio = 1.0 / 30.0  # ECGPUWave uses 1/30
+        min_amplitude_ratio = 1.0 / 30.0  # Amplitude validation threshold: P wave must be > 1/30 of R wave
         min_amplitude = min_amplitude_ratio * abs(r_amplitude)
         if max_amplitude_ecgpb < min_amplitude:
             if verbose:
@@ -258,7 +258,7 @@ def detect_p_wave_ecgpuwave_style(
         p_amplitude = float(ecgpb[p_peak_idx])
     
     # Check for two distinct peaks (>20 ms apart)
-    # (ECGPUWave records both, but we'll use the first/larger one for now)
+    # (Dual peak detection records both, but we'll use the first/larger one for now)
     # TODO: Implement dual peak detection if needed
     
     # Step 6: Find P wave onset (P1)
