@@ -594,6 +594,10 @@ class PyHEARTS:
                 "QTc_Bazett_ms",
                 "QTc_Fridericia_ms",
                 "QTc_Framingham_ms",
+                # ST segment features
+                "ST_elevation_mv",
+                "ST_slope_mv_per_s",
+                "ST_deviation_mv",
             ]
             
             pairwise_diff_keys = [

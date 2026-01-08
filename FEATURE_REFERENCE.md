@@ -2,7 +2,7 @@
 
 Complete list of all features extracted by PyHEARTS, including definitions and calculation methods.
 
-**Total Features**: 181 per cardiac cycle + 7 HRV metrics + ~45-70 variability metrics = **~240 total features**
+**Total Features**: 184 per cardiac cycle + 7 HRV metrics + ~45-70 variability metrics = **~243 total features**
 
 ---
 
@@ -332,6 +332,52 @@ Timing intervals between different waves or wave boundaries.
 - **Units**: Milliseconds (ms)
 - **Physiological Range**: 5-700 ms (validated)
 - **Clinical Significance**: Total ST segment + T-wave duration
+
+### ST Segment Features (3 features)
+
+These features quantify ST segment morphology, which is critical for detecting myocardial ischemia and infarction.
+
+#### `ST_elevation_mv`
+- **Definition**: ST segment elevation at J point + 60ms (standard clinical measurement point)
+- **Calculation**: Voltage at `S_ri_idx + (60ms * sampling_rate / 1000)` samples
+- **Units**: Millivolts (mV)
+- **Measurement Point**: J point (end of QRS/S wave) + 60ms offset
+- **Clinical Significance**: 
+  - ST elevation >0.1 mV in 2+ contiguous leads suggests acute myocardial infarction
+  - ST elevation can also indicate pericarditis, early repolarization, or left ventricular aneurysm
+- **Interpretation**:
+  - Normal: -0.05 to +0.05 mV
+  - Elevated: >0.1 mV (pathological)
+  - Depressed: <-0.05 mV (may indicate ischemia)
+
+#### `ST_slope_mv_per_s`
+- **Definition**: Slope of ST segment (linear fit from S end to T start)
+- **Calculation**: Linear regression slope of ST segment voltage vs. time
+- **Units**: Millivolts per second (mV/s)
+- **Clinical Significance**: 
+  - Positive slope: Normal or early repolarization
+  - Negative slope: May indicate ischemia or injury
+  - Flat/horizontal: Can indicate acute MI
+- **Interpretation**:
+  - Normal: Slightly positive or flat
+  - Pathological: Strongly negative or horizontal with elevation
+
+#### `ST_deviation_mv`
+- **Definition**: ST segment deviation from baseline (isoelectric line)
+- **Calculation**: `ST_elevation_mv - baseline_voltage`
+- **Baseline**: Median voltage of PR segment (P end to Q start), or pre-ST window if PR unavailable
+- **Units**: Millivolts (mV)
+- **Clinical Significance**: 
+  - Quantifies ST elevation/depression relative to isoelectric line
+  - More clinically relevant than absolute elevation (accounts for baseline drift)
+- **Interpretation**:
+  - Positive: ST elevation (elevation above baseline)
+  - Negative: ST depression (below baseline)
+  - Normal: Near zero (±0.05 mV)
+
+**Requirements**: Requires both `S_ri_idx` (J point) and `T_le_idx` (T wave start) to be detected. Returns `NaN` if either is missing or if ST segment is invalid.
+
+**Note**: ST segment features are computed using the detrended signal to remove baseline wander.
 
 ### 6. QT Interval
 
@@ -677,6 +723,24 @@ r_height_std = hearts.variability_metrics.get('R_gauss_height_std')
 10. `QTc_Fridericia_ms` (rate-corrected QT using Fridericia's formula)
 11. `QTc_Framingham_ms` (rate-corrected QT using Framingham formula)
 
+### ST Segment Features (3 features)
+
+1. `ST_elevation_mv`
+2. `ST_slope_mv_per_s`
+3. `ST_deviation_mv`
+
+1. `PR_interval_ms`
+2. `PR_segment_ms`
+3. `QRS_interval_ms`
+4. `ST_segment_ms`
+5. `ST_interval_ms`
+6. `QT_interval_ms`
+7. `RR_interval_ms`
+8. `PP_interval_ms`
+9. `QTc_Bazett_ms` (rate-corrected QT using Bazett's formula)
+10. `QTc_Fridericia_ms` (rate-corrected QT using Fridericia's formula)
+11. `QTc_Framingham_ms` (rate-corrected QT using Framingham formula)
+
 ### Pairwise Differences (3 features)
 
 1. `R_minus_S_voltage_diff_signed`
@@ -718,7 +782,7 @@ Default priority features (9-14 features, depending on detection):
 
 ## Total Feature Count
 
-- **Per-cycle features**: 165 (morphological) + 11 (intervals) + 3 (pairwise) + 2 (fit quality) = **181 features per cycle**
+- **Per-cycle features**: 165 (morphological) + 11 (intervals) + 3 (ST segment) + 3 (pairwise) + 2 (fit quality) = **184 features per cycle**
 - **HRV metrics**: 7 features (computed once per recording)
 - **Variability metrics**: ~45-70 features (5 metrics × 9-14 priority features, computed once per recording)
 - **Grand total**: **~240 features** per ECG recording
@@ -780,6 +844,7 @@ print(hearts.variability_metrics)  # Dictionary with variability metrics
 - Feature extraction: `pyhearts/feature/shape.py`, `pyhearts/feature/intervals.py`
 - Gaussian fitting: `pyhearts/processing/gaussian.py`
 - Interval calculation: `pyhearts/feature/intervals.py`
+- ST segment features: `pyhearts/feature/st_segment.py`
 - HRV computation: `pyhearts/feature/hrv.py`
 - Variability computation: `pyhearts/feature/variability.py`
 - Main processing: `pyhearts/processing/processcycle.py`

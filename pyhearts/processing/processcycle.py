@@ -11,6 +11,7 @@ from scipy.signal import butter, filtfilt
 # Custom imports for PyHEARTS
 from pyhearts.config import ProcessCycleConfig
 from pyhearts.feature import calc_intervals, interval_ms, extract_shape_features
+from pyhearts.feature.st_segment import extract_st_segment_features
 from pyhearts.fitmetrics import calc_r_squared, calc_rmse
 from pyhearts.plots import plot_fit, plot_labeled_peaks, plot_rise_decay
 from .bounds import calc_bounds, calc_bounds_skewed
@@ -2696,6 +2697,61 @@ def process_cycle(
     )
     for interval_name, value in interval_results.items():
         output_dict[interval_name][cycle_idx] = value
+    
+    # Extract ST segment features (elevation, slope, deviation)
+    try:
+        s_ri_idx = None
+        t_le_idx = None
+        p_ri_idx = None
+        q_le_idx = None
+        
+        if 'S_ri_idx' in peak_series_dict and cycle_idx < len(peak_series_dict['S_ri_idx']):
+            s_ri_val = peak_series_dict['S_ri_idx'][cycle_idx]
+            if not np.isnan(s_ri_val):
+                s_ri_idx = int(s_ri_val)
+        
+        if 'T_le_idx' in peak_series_dict and cycle_idx < len(peak_series_dict['T_le_idx']):
+            t_le_val = peak_series_dict['T_le_idx'][cycle_idx]
+            if not np.isnan(t_le_val):
+                t_le_idx = int(t_le_val)
+        
+        if 'P_ri_idx' in peak_series_dict and cycle_idx < len(peak_series_dict['P_ri_idx']):
+            p_ri_val = peak_series_dict['P_ri_idx'][cycle_idx]
+            if not np.isnan(p_ri_val):
+                p_ri_idx = int(p_ri_val)
+        
+        if 'Q_le_idx' in peak_series_dict and cycle_idx < len(peak_series_dict['Q_le_idx']):
+            q_le_val = peak_series_dict['Q_le_idx'][cycle_idx]
+            if not np.isnan(q_le_val):
+                q_le_idx = int(q_le_val)
+        
+        st_features = extract_st_segment_features(
+            signal=sig_detrended,
+            s_ri_idx=s_ri_idx,
+            t_le_idx=t_le_idx,
+            p_ri_idx=p_ri_idx,
+            q_le_idx=q_le_idx,
+            sampling_rate=sampling_rate,
+            j_point_offset_ms=60.0,
+            verbose=verbose,
+        )
+        
+        # Store ST segment features in output_dict
+        for feature_name, value in st_features.items():
+            if feature_name not in output_dict:
+                # Initialize if not present
+                output_dict[feature_name] = [np.nan] * len(output_dict.get("cycle_trend", []))
+            if cycle_idx < len(output_dict[feature_name]):
+                output_dict[feature_name][cycle_idx] = value
+    except Exception as e:
+        if verbose:
+            print(f"[Cycle {cycle_idx}]: Error extracting ST segment features: {e}")
+        # Ensure ST features are initialized even if extraction fails
+        for feature_name in ['ST_elevation_mv', 'ST_slope_mv_per_s', 'ST_deviation_mv']:
+            if feature_name not in output_dict:
+                output_dict[feature_name] = [np.nan] * len(output_dict.get("cycle_trend", []))
+            if cycle_idx < len(output_dict[feature_name]):
+                output_dict[feature_name][cycle_idx] = np.nan
 
     for key in INTERVAL_PEAK_KEYS:
         idx = peak_series_dict[key][cycle_idx] if cycle_idx < len(peak_series_dict[key]) else None
