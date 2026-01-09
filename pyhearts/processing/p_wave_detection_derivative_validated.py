@@ -39,14 +39,27 @@ def bandpass_filter_p_wave(
 
 def estimate_noise_level(signal_segment: np.ndarray) -> float:
     """
-    Estimate noise level using window-based noise estimation method.
+    Estimate noise level using a window-based noise estimation method.
     
-    Window-based noise estimation method:
-    - Divides signal into 5-sample windows
-    - For each window, calculates (max - min)
-    - Returns the average of these differences
+    This method divides the signal into 5-sample windows and computes the
+    average of (max - min) differences across all windows. This approach
+    provides a robust noise estimate that is less sensitive to outliers than
+    standard deviation-based methods, making it particularly well-suited for
+    ECG signals where occasional artifacts or baseline wander can skew
+    traditional statistical measures. The window size of 5 samples balances
+    local noise characterization with computational efficiency, capturing
+    short-term signal variability without being overly sensitive to
+    single-sample outliers.
     
-    This is more robust than standard deviation for ECG noise estimation.
+    Parameters
+    ----------
+    signal_segment : np.ndarray
+        Signal segment for noise estimation.
+    
+    Returns
+    -------
+    float
+        Estimated noise level (average of window (max - min) differences).
     """
     if len(signal_segment) == 0:
         return 0.0
@@ -213,11 +226,11 @@ def detect_p_wave_derivative_validated(
     if ibw_original <= 0:
         ibw_original = 1
     
-        # Outer loop: iteratively reduce window if P not found (adaptive window reduction)
+    # Outer loop: iteratively reduce window if P not found (adaptive window reduction)
     iew = iew_original
     ibw = ibw_original
     outer_iteration = 0
-        max_outer_iterations = 6  # Reduced from 10 to 6 for performance (iterative window reduction typically uses fewer iterations)
+    max_outer_iterations = 6  # Reduced from 10 to 6 for performance (iterative window reduction typically uses fewer iterations)
     P_detected = False
     final_result = (None, None, None, None)
     

@@ -469,3 +469,4 @@ If all suggested features were implemented:
 - Task Force of the European Society of Cardiology. Heart rate variability: standards of measurement, physiological interpretation, and clinical use. Circulation. 1996;93:1043-1065.
 - Tereshchenko LG, et al. Beat-to-beat QT interval variability: novel evidence for repolarization lability in ischemic and nonischemic dilated cardiomyopathy. Circulation. 2008;118:191-199.
 
+

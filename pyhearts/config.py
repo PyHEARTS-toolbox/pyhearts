@@ -285,10 +285,10 @@ class ProcessCycleConfig:
             cls(),
             detrend_window_ms=200,
             postQRS_refractory_window_ms=20,
-            # Established delineation methods use 1/30 (3.3%) for P waves, we use 2.0% as a balance
-            amp_min_ratio={"P": 0.020, "T": 0.020, "Q": 0.015, "S": 0.015},  # 2.0% for P/T (established methods use 3.3%)
-            # Established delineation methods have NO SNR gate, we use very lenient 0.5× MAD
-            snr_mad_multiplier={"P": 0.5, "T": 0.5},  # Very lenient (established methods typically have none)
+            # High-sensitivity amplitude ratio: 2.0% of R peak for P/T waves
+            amp_min_ratio={"P": 0.020, "T": 0.020, "Q": 0.015, "S": 0.015},  # 2.0% for P/T
+            # Very lenient SNR gate (0.5× MAD) to maximize sensitivity for small-amplitude waves
+            snr_mad_multiplier={"P": 0.5, "T": 0.5},  # Very lenient threshold optimized for high detection rates
             snr_exclusion_ms={"P": 0, "T": 10},
             snr_apply_savgol={"P": False, "T": True},
             rr_bounds_ms=(300, 1800),
@@ -318,15 +318,5 @@ class ProcessCycleConfig:
             p_enable_morphology_validation=False,  # Disabled to support abnormal cycles
             version="v2.0-human-high-sensitivity",
         )
-
-    @classmethod
-    def for_human_ecgpuwave_style(cls) -> "ProcessCycleConfig":
-        """
-        Alias for for_human() - maintained for backward compatibility.
-        
-        The default for_human() preset now uses high-sensitivity detection settings.
-        This method is kept for backward compatibility but simply returns for_human().
-        """
-        return cls.for_human()
 
 #
