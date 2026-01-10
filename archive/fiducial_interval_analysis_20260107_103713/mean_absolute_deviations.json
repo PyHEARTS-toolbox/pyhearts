@@ -1,0 +1,42 @@
+{
+  "ecgpuwave_annotations": {
+    "R": {
+      "ph_mad": null,
+      "ecg_mad": null,
+      "ph_n": 0,
+      "ecg_n": 0
+    },
+    "P": {
+      "ph_mad": null,
+      "ecg_mad": null,
+      "ph_n": 0,
+      "ecg_n": 0
+    },
+    "T": {
+      "ph_mad": null,
+      "ecg_mad": null,
+      "ph_n": 0,
+      "ecg_n": 0
+    }
+  },
+  "manual_annotations": {
+    "R": {
+      "ph_mad": null,
+      "ecg_mad": null,
+      "ph_n": 0,
+      "ecg_n": 0
+    },
+    "P": {
+      "ph_mad": null,
+      "ecg_mad": null,
+      "ph_n": 0,
+      "ecg_n": 0
+    },
+    "T": {
+      "ph_mad": null,
+      "ecg_mad": null,
+      "ph_n": 0,
+      "ecg_n": 0
+    }
+  }
+}

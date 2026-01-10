@@ -109,10 +109,10 @@ cython_debug/
 !docs/**/*.png
 !docs/**/*.jpg
 
-# Data files (uncomment if needed)
-# data/
-# raw_data/
-# results/
+# Data files
+data/
+raw_data/
+results/
 
 # Benchmark test data (large files - regenerate with generate_test_data.py)
 # Note: benchmark/ is now in dev/ which is ignored
@@ -133,9 +133,28 @@ IMPROVEMENTS_SUMMARY.md
 PHYSIOLOGICAL_VALIDATION.md
 POLARITY_AND_QUALITY_FIXES.md
 TWAVE_TUNING_COMPLETE.md
+T_PEAK_ANALYSIS_REPORT.md
 *_SUMMARY.md
 *_COMPLETE.md
 *_FIXES.md
+*_ANALYSIS_REPORT.md
+*_ANALYSIS*.md
+*_ANALYSIS_RESULTS.md
+*_COMPARISON.md
+*_DETECTION*.md
+*_DIAGNOSIS.md
+*_EXPLANATION.md
+*_FIX*.md
+*_IMPLEMENTATION.md
+*_PERFORMANCE*.md
+*_REPORT.md
+*_RESULTS.md
+*_SELECTION*.md
+*_UPDATE.md
+*_VS_*.md
+WHY_*.md
+ECGPUWAVE*.md
+QRS_CHARACTERISTIC*.md
 
 # Plot images (generated files)
 *.png
@@ -158,6 +177,17 @@ selected_leads.csv
 *_hrv_metrics.csv
 *_meta.json
 *_pyhearts.csv
+t_peak_analysis_results.csv
+*_t_wave_analysis.png
+*_analysis_results.csv
+*_detection_analysis.csv
+*_failure_investigation.csv
+*_subjects_analysis.csv
+sel*_epochs_*.csv
+sel*_output_*.csv
+accuracy_analysis_results.csv
+rpeak_detection_analysis.csv
+underperforming_subjects_analysis.csv
 
 # Build artifacts
 pyhearts.egg-info/
@@ -165,4 +195,78 @@ pyhearts.egg-info/
 
 # Development and non-essential files (benchmarks, analysis, external tools)
 dev/
+
+# Analysis folder (contains all non-toolbox analysis scripts, results, and documentation)
+analysis/
+
+# External tools and binaries
+ecgpuwave-*/
+qtdb_full_ecgpuwave_results/
+
+# QTDB results subdirectories (analysis outputs)
+qtdb_results/*/
+!qtdb_results/ecgpuwave_results_pw/
+
+# Development/utility scripts (not part of the toolbox)
+process_qtdb_full.py
+verify_installation.py
+analyze_*.py
+check_*.py
+compare_*.py
+debug_*.py
+diagnose_*.py
+evaluate_*.py
+investigate_*.py
+plot_*.py
+regenerate_*.py
+run_*.py
+test_original_*.py
+test_sel*.py
+test_ecgpuwave_*.py
+test_improved_*.py
+test_p_detection_*.py
+test_p_t_detection_*.py
+test_qrs_*.py
+validate_*.py
+visualize_*.py
+
+# Example/integration files (not part of the toolbox)
+pyhearts/processing/adaptive_threshold_integration_example.py
+
+# Analysis/documentation directories (non-toolbox)
+p_peak_analysis/
+reviewer_response/
+qtdb_*/
+
+# Additional analysis/validation markdown files
+R_S_SAME_INDEX*.md
+QRS_ONSET*.md
+BEAT_BY_BEAT*.md
+CYCLE5*.md
+DERMAX*.md
+NOISE_CHECK*.md
+OUTER_LOOP*.md
+P_PEAK*.md
+VALIDATION*.md
+COMPREHENSIVE*.md
+ECGPUWAVE*.md
+FIXES_APPLIED*.md
+ROOT_CAUSE*.md
+analyze_ecgpuwave*.md
+
+# Additional utility/analysis scripts
+capture_*.py
+full_assessment_*.py
+in_depth_*.py
+
+# Processing module development files (non-toolbox - experimental/alternative implementations)
+pyhearts/processing/p_wave_detection_*.py
+# Exceptions: These P-wave detection modules are used in production code
+!pyhearts/processing/p_wave_detection_improved.py
+!pyhearts/processing/p_wave_detection_derivative_validated.py
+!pyhearts/processing/p_wave_detection_fixed_window.py
+pyhearts/processing/qrs_boundary_detection.py
+
+# Verification/utility scripts
+verify_*.py
 

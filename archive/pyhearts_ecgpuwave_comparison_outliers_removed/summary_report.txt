@@ -1,0 +1,62 @@
+================================================================================
+PyHEARTS vs ECGpuwave Performance Comparison
+Against QTDB Manual Annotations (Ground Truth)
+Outlier Removal: IQR method
+================================================================================
+
+Total subjects analyzed: 104
+
+
+R Peak Detection:
+--------------------------------------------------------------------------------
+ECGpuwave:
+  Detection Rate: 3451 / 3451 (100.0%)
+  Outliers Removed: 251
+  Mean Absolute Error: 11.34 ± 5.82 ms
+  Median Absolute Error: 12.00 ms
+  RMSE: 11.84 ± 5.88 ms
+PyHEARTS:
+  Detection Rate: 2495 / 2495 (100.0%)
+  Outliers Removed: 172
+  Mean Absolute Error: 10.97 ± 9.25 ms
+  Median Absolute Error: 8.00 ms
+  RMSE: 11.57 ± 9.23 ms
+Comparison:
+  MAE Difference (PyHEARTS - ECGpuwave): -0.37 ms
+  → PyHEARTS is 0.37 ms more accurate on average
+
+P Peak Detection:
+--------------------------------------------------------------------------------
+ECGpuwave:
+  Detection Rate: 2950 / 3256 (90.6%)
+  Outliers Removed: 142
+  Mean Absolute Error: 55.55 ± 276.09 ms
+  Median Absolute Error: 8.00 ms
+  RMSE: 74.86 ± 377.33 ms
+PyHEARTS:
+  Detection Rate: 1391 / 2336 (59.5%)
+  Outliers Removed: 61
+  Mean Absolute Error: 181.27 ± 442.85 ms
+  Median Absolute Error: 16.00 ms
+  RMSE: 201.82 ± 520.99 ms
+Comparison:
+  MAE Difference (PyHEARTS - ECGpuwave): +125.72 ms
+  → ECGpuwave is 125.72 ms more accurate on average
+
+T Peak Detection:
+--------------------------------------------------------------------------------
+ECGpuwave:
+  Detection Rate: 3327 / 3396 (98.0%)
+  Outliers Removed: 222
+  Mean Absolute Error: 32.83 ± 55.34 ms
+  Median Absolute Error: 8.00 ms
+  RMSE: 36.71 ± 57.52 ms
+PyHEARTS:
+  Detection Rate: 1620 / 2454 (66.0%)
+  Outliers Removed: 81
+  Mean Absolute Error: 36.77 ± 53.13 ms
+  Median Absolute Error: 12.00 ms
+  RMSE: 38.65 ± 53.13 ms
+Comparison:
+  MAE Difference (PyHEARTS - ECGpuwave): +3.94 ms
+  → ECGpuwave is 3.94 ms more accurate on average

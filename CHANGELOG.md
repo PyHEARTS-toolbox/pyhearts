@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **QRS Removal for T-wave Detection**: New `qrs_removal.py` module implementing ECGPUWAVE-style QRS removal
+- **QRS Removal for T-wave Detection**: New `qrs_removal.py` module implementing established QRS removal method
   - `remove_qrs_sigmoid()`: Replaces QRS complexes with sigmoid functions to reduce interference
   - `remove_baseline_wander()`: Two-stage baseline removal (750ms + 2000ms windows) for cleaner T-wave detection
   - Integrated into derivative-based peak detection pipeline when `t_wave_use_qrs_removal=True`
@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **T-wave Detection Improvements**:
-  - QRS removal now applied before T-wave detection in derivative-based mode (mimics ECGPUWAVE approach)
+  - QRS removal now applied before T-wave detection in derivative-based mode using sigmoid replacement to reduce interference from residual depolarization activity
   - SNR gate now uses filtered/QRS-removed signal consistently for accurate SNR calculations
   - Relaxed T-wave SNR threshold from 1.5× to 0.8× MAD in `for_human()` preset for improved detection
   - Fixed precomputed peak mapping: now uses `index` column (global sample indices) instead of `signal_x` (relative time) for correct cycle-to-R-peak mapping

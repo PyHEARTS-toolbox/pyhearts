@@ -320,6 +320,95 @@ def calc_sharpness_derivative(
     return float(val) if np.isfinite(val) else np.nan
 
 
+def calc_slope_features(
+    signal: np.ndarray,
+    left_idx: int,
+    center_idx: int,
+    right_idx: int,
+    *,
+    fs: float,
+) -> Tuple[float, float, float]:
+    """
+    Compute slope features for a wave segment: max upslope, max downslope, and slope asymmetry.
+    
+    Parameters
+    ----------
+    signal : np.ndarray
+        Input 1D ECG signal array.
+    left_idx : int
+        Left edge (onset) index of the wave.
+    center_idx : int
+        Center (peak) index of the wave.
+    right_idx : int
+        Right edge (offset) index of the wave.
+    fs : float
+        Sampling rate in Hz.
+    
+    Returns
+    -------
+    Tuple[float, float, float]
+        (max_upslope_mv_per_s, max_downslope_mv_per_s, slope_asymmetry)
+        - max_upslope_mv_per_s: Maximum positive slope in rising phase (mV/s)
+        - max_downslope_mv_per_s: Maximum negative slope in falling phase (mV/s)
+        - slope_asymmetry: Ratio of upslope to downslope magnitudes (dimensionless)
+        Returns (np.nan, np.nan, np.nan) if inputs are invalid.
+    
+    Notes
+    -----
+    - For negative peaks (Q, S), upslope is the rising phase toward the peak,
+      and downslope is the falling phase away from the peak.
+    - Slope asymmetry = abs(max_upslope) / abs(max_downslope)
+      - >1: Faster rise than decay
+      - <1: Faster decay than rise
+      - =1: Symmetric slopes
+    """
+    # Guardrails
+    if (left_idx is None or center_idx is None or right_idx is None or
+        left_idx >= center_idx or center_idx >= right_idx):
+        return np.nan, np.nan, np.nan
+    
+    if fs <= 0:
+        return np.nan, np.nan, np.nan
+    
+    # Ensure indices are within bounds
+    n = len(signal)
+    left_idx = max(0, min(left_idx, n - 1))
+    center_idx = max(0, min(center_idx, n - 1))
+    right_idx = max(0, min(right_idx, n - 1))
+    
+    if left_idx >= center_idx or center_idx >= right_idx:
+        return np.nan, np.nan, np.nan
+    
+    dt = 1.0 / float(fs)
+    
+    # Extract rising phase (onset to peak)
+    rise_segment = signal[left_idx:center_idx + 1]
+    if rise_segment.size < 2:
+        return np.nan, np.nan, np.nan
+    
+    # Compute derivative (slope) for rising phase
+    rise_diff = np.diff(rise_segment) / dt
+    max_upslope = float(np.max(rise_diff)) if len(rise_diff) > 0 else np.nan
+    
+    # Extract falling phase (peak to offset)
+    decay_segment = signal[center_idx:right_idx + 1]
+    if decay_segment.size < 2:
+        return np.nan, np.nan, np.nan
+    
+    # Compute derivative (slope) for falling phase
+    decay_diff = np.diff(decay_segment) / dt
+    max_downslope = float(np.min(decay_diff)) if len(decay_diff) > 0 else np.nan
+    
+    # Compute slope asymmetry
+    if (np.isfinite(max_upslope) and np.isfinite(max_downslope) and
+        abs(max_downslope) > 1e-6):
+        slope_asymmetry = abs(max_upslope) / abs(max_downslope)
+    else:
+        slope_asymmetry = np.nan
+    
+    return max_upslope, max_downslope, slope_asymmetry
+
+
 
 
 def estimate_local_baseline(
@@ -356,7 +445,7 @@ def estimate_local_baseline(
     cfg = cfg or ProcessCycleConfig()
     baseline_window_frac = cfg.local_baseline_window_fraction
     
-    # For P-wave onset, use more of the pre-P region for baseline (ECGPUWAVE approach)
+    # For P-wave onset, use more of the pre-P region for baseline
     if comp_label == "P" and direction in ("left", "both"):
         # Use larger window for P-wave baseline estimation
         baseline_window_frac = min(0.5, baseline_window_frac * 1.5)
@@ -473,7 +562,7 @@ def find_waveform_limit_derivative(
     direction: str = "left",  # "left" for onset, "right" for offset
 ) -> int:
     """
-    Find waveform limit using derivative-based approach (ECGPUWAVE-style).
+    Find waveform limit using derivative-based approach.
     
     Detects the point where signal slope/curvature changes significantly
     relative to local baseline, rather than using fixed threshold.
@@ -547,7 +636,7 @@ def find_waveform_limit_derivative(
         sig, center_idx, search_samples, direction=direction, cfg=cfg, comp_label=comp_label
     )
     
-    # Step 4: Adjust sensitivity for P-waves and T-offset (ECGPUWAVE-style)
+    # Step 4: Adjust sensitivity for P-waves and T-offset
     deriv_multiplier = cfg.waveform_limit_deriv_multiplier
     baseline_multiplier = cfg.waveform_limit_baseline_multiplier
     
@@ -556,7 +645,7 @@ def find_waveform_limit_derivative(
         deriv_multiplier *= cfg.p_wave_deriv_sensitivity_multiplier * 0.6  # extra sensitivity
         baseline_multiplier *= 1.2  # more lenient baseline proximity for P onset
     elif comp_label == "T" and direction == "right":
-        # T-wave offset: stricter baseline tolerance (ECGPUWAVE approach)
+        # T-wave offset: stricter baseline tolerance
         # Require signal to be closer to baseline before detecting offset
         baseline_multiplier *= 0.7  # Stricter: 70% of default tolerance
         deriv_multiplier *= 1.3  # Less sensitive: require smaller derivative (130% of default)
@@ -564,7 +653,7 @@ def find_waveform_limit_derivative(
     # Step 5: Adaptive threshold: derivative must drop to < noise_level × multiplier
     deriv_threshold = local_noise * deriv_multiplier
     
-    # Step 6: Search from peak outward (ECGPUWAVE-style for P onset)
+    # Step 6: Search from peak outward (for P onset)
     limit_idx = center_idx
     
     # Map center_idx to segment coordinates
@@ -573,9 +662,9 @@ def find_waveform_limit_derivative(
     else:  # right
         center_in_segment = 0  # center is at start of segment for right search
     
-    # For P-wave onset, use more sophisticated detection (ECGPUWAVE-style)
+    # For P-wave onset, use more sophisticated detection
     if comp_label == "P" and direction == "left":
-        # ECGPUWAVE approach: find where signal transitions from baseline to rising
+        # Find where signal transitions from baseline to rising
         # More conservative: require clear evidence of transition
         
         best_onset = center_idx
@@ -621,7 +710,7 @@ def find_waveform_limit_derivative(
                                 signal_ahead_2 > signal_ahead_1 and
                                 signal_ahead_3 > signal_ahead_2)
             
-            # P onset criteria (conservative ECGPUWAVE-style):
+            # P onset criteria (conservative):
             # 1. At baseline ✓
             # 2. Current derivative is small (not yet rising significantly)
             # 3. Derivative ahead is clearly positive AND signal ahead shows sustained rise
@@ -673,7 +762,7 @@ def find_waveform_limit_derivative(
             # Transition found if: at baseline AND derivative small
             # OR: curvature change detected (inflection point)
             if (at_baseline and deriv_small) or (curvature_change and at_baseline):
-                # For T-offset, require sustained baseline (ECGPUWAVE approach)
+                # For T-offset, require sustained baseline
                 # T-waves have long tails - need to ensure signal stays at baseline
                 if comp_label == "T" and direction == "right":
                     # Check if signal stays at baseline for next few samples
@@ -754,7 +843,7 @@ def find_asymmetric_bounds_stdguided(
     standard deviation and physiologic window constraints.
     
     Uses a hybrid approach:
-    1. Primary: derivative-based waveform limit detection (ECGPUWAVE-style)
+    1. Primary: derivative-based waveform limit detection
     2. Fallback: adaptive threshold crossing if derivative method fails
     
     The derivative-based method detects actual signal changes (slope/curvature)
@@ -860,6 +949,7 @@ def extract_shape_features(
     *,
     cfg: Optional[ProcessCycleConfig] = None,
     verbose: bool = False,
+    precomputed_bounds: Optional[Dict[str, Tuple[int, int]]] = None,
 ) -> Dict[str, Any]:
     """
     Extract morphological shape features for labeled ECG components.
@@ -910,33 +1000,99 @@ def extract_shape_features(
     bounds_by_wave: Dict[str, Tuple[int, int]] = {}
 
     for i, label in enumerate(component_labels):
-        center = gauss_centers[i]
-        height = gauss_heights[i]
-        stdev  = gauss_stdevs[i]
+        # Ensure values are numeric before checking isfinite
+        try:
+            center = float(gauss_centers[i]) if gauss_centers[i] is not None else np.nan
+            height = float(gauss_heights[i]) if gauss_heights[i] is not None else np.nan
+            stdev = float(gauss_stdevs[i]) if gauss_stdevs[i] is not None else np.nan
+        except (ValueError, TypeError, IndexError):
+            # Skip if conversion fails or index out of range
+            continue
+        
+        # Check if all values are finite
         if not (np.isfinite(center) and np.isfinite(height) and np.isfinite(stdev)):
             continue
 
         approx_center_idx = int(round(center))
-        left_idx, right_idx = find_asymmetric_bounds_stdguided(
-            sig=signal,
-            center_idx=approx_center_idx,
-            height=height,
-            std=stdev,
-            sampling_rate=sampling_rate,
-            comp_label=label,
-            cfg=cfg,
-        )
-        left_idx = max(0, left_idx)
-        right_idx = min(len(signal) - 1, right_idx)
+        # Ensure center index is within bounds
+        approx_center_idx = max(0, min(len(signal) - 1, approx_center_idx))
+        
+        # Use precomputed boundaries if available (for Q and S with derivative-based QRS boundaries)
+        if precomputed_bounds is not None and label in precomputed_bounds:
+            precomputed = precomputed_bounds[label]
+            if label == "Q":
+                # For Q: precomputed is (left, center) - compute right boundary
+                left_idx = max(0, min(len(signal) - 1, int(precomputed[0])))
+                center_for_bounds = max(0, min(len(signal) - 1, int(precomputed[1])))
+                # Compute right boundary using standard method
+                _, right_idx = find_asymmetric_bounds_stdguided(
+                    sig=signal,
+                    center_idx=center_for_bounds,
+                    height=height,
+                    std=stdev,
+                    sampling_rate=sampling_rate,
+                    comp_label=label,
+                    cfg=cfg,
+                )
+                # But only use the right boundary, keep the precomputed left
+                right_idx = max(left_idx + 1, min(len(signal) - 1, right_idx))
+            elif label == "S":
+                # For S: precomputed is (center, right) - compute left boundary
+                right_idx = max(0, min(len(signal) - 1, int(precomputed[1])))
+                center_for_bounds = max(0, min(len(signal) - 1, int(precomputed[0])))
+                # Compute left boundary using standard method
+                left_idx, _ = find_asymmetric_bounds_stdguided(
+                    sig=signal,
+                    center_idx=center_for_bounds,
+                    height=height,
+                    std=stdev,
+                    sampling_rate=sampling_rate,
+                    comp_label=label,
+                    cfg=cfg,
+                )
+                # But only use the left boundary, keep the precomputed right
+                left_idx = max(0, min(right_idx - 1, left_idx))
+            else:
+                # Shouldn't happen, but fallback to standard method
+                left_idx, right_idx = find_asymmetric_bounds_stdguided(
+                    sig=signal,
+                    center_idx=approx_center_idx,
+                    height=height,
+                    std=stdev,
+                    sampling_rate=sampling_rate,
+                    comp_label=label,
+                    cfg=cfg,
+                )
+                left_idx = max(0, left_idx)
+                right_idx = min(len(signal) - 1, right_idx)
+        else:
+            # Standard method: compute both boundaries
+            left_idx, right_idx = find_asymmetric_bounds_stdguided(
+                sig=signal,
+                center_idx=approx_center_idx,
+                height=height,
+                std=stdev,
+                sampling_rate=sampling_rate,
+                comp_label=label,
+                cfg=cfg,
+            )
+            left_idx = max(0, left_idx)
+            right_idx = min(len(signal) - 1, right_idx)
+        
         if right_idx <= left_idx:
             continue
 
         # refine center for Q/S as trough
         if label in {"Q", "S"}:
+            # Ensure indices are valid before slicing
+            if left_idx >= len(signal) or right_idx >= len(signal) or left_idx < 0 or right_idx < 0:
+                continue
             segment = signal[left_idx:right_idx+1]
             if segment.size == 0:
                 continue
             center_idx = left_idx + int(np.argmin(segment))
+            # Ensure center_idx is within bounds
+            center_idx = max(0, min(len(signal) - 1, center_idx))
         else:
             center_idx = approx_center_idx
 
@@ -962,18 +1118,24 @@ def extract_shape_features(
         sharpness = calc_sharpness_derivative(
             signal, left_idx, right_idx, fs=sampling_rate, cfg=cfg
         )
+        
+        # Compute slope features
+        max_upslope, max_downslope, slope_asymmetry = calc_slope_features(
+            signal, left_idx, center_idx, right_idx, fs=sampling_rate
+        )
 
         to_ms = lambda s: (s / sampling_rate) * 1000.0
         shape_features_list.append(
             [to_ms(duration_samples), float(right_idx), float(left_idx),
-             to_ms(rise_samples), to_ms(decay_samples), float(rdsm), float(sharpness)]
+             to_ms(rise_samples), to_ms(decay_samples), float(rdsm), float(sharpness),
+             float(max_upslope), float(max_downslope), float(slope_asymmetry)]
         )
         valid_labels.append(label)
         bounds_by_wave[label] = (left_idx, right_idx)
 
     # pack arrays
     shape_features_array = (
-        np.asarray(shape_features_list, dtype=float) if shape_features_list else np.empty((0, 7))
+        np.asarray(shape_features_list, dtype=float) if shape_features_list else np.empty((0, 10))
     )
 
     # per-component dict
@@ -989,6 +1151,9 @@ def extract_shape_features(
             "decay_ms": float(shape_features_array[row_idx, 4]),
             "rdsm": float(shape_features_array[row_idx, 5]),
             "sharpness": float(shape_features_array[row_idx, 6]),
+            "max_upslope_mv_per_s": float(shape_features_array[row_idx, 7]),
+            "max_downslope_mv_per_s": float(shape_features_array[row_idx, 8]),
+            "slope_asymmetry": float(shape_features_array[row_idx, 9]),
             "voltage_integral_uv_ms": float(
                 np.nan if label not in bounds_by_wave else
                 compute_voltage_integrals(signal, {label: bounds_by_wave[label]}, sampling_rate)[f"{label}_voltage_integral"]

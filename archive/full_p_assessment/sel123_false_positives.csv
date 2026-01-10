@@ -1,0 +1,5 @@
+fp_peak_global,fp_peak_rel,ecg_peak_global,ecg_peak_rel,distance_ms,cycle_idx,qrs_onset_rel,ibw_expected,iew_expected,fp_in_window,ecg_in_window,offset_from_ecg,offset_from_ecg_ms
+5544,3624,5562,3642,72.0,3,3683,3633,3675,False,True,-18,-72.0
+9534,1122,9482,1070,208.0,10,1096,1046,1088,False,True,52,208.0
+9534,1122,9482,1070,208.0,10,1096,1046,1088,False,True,52,208.0
+16605,1631,16600,1626,20.0,16,1656,1606,1648,True,True,5,20.0

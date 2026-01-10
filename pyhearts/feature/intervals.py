@@ -99,7 +99,138 @@ def calc_intervals(
 
         result[interval_ms] = duration_ms if min_ms <= duration_ms <= max_ms else np.nan
 
+    # Note: QTc calculations are performed in processcycle.py after RR_interval_ms is available
+    # RR_interval_ms is calculated separately from R-peak positions, not from peak_series
+
     return result
+
+
+def calc_qtc_bazett(qt_ms: float, rr_ms: float) -> float:
+    """
+    Calculate QTc using Bazett's formula.
+    
+    QTc = QT / √(RR / 1000)
+    
+    Parameters
+    ----------
+    qt_ms : float
+        QT interval in milliseconds.
+    rr_ms : float
+        RR interval in milliseconds.
+    
+    Returns
+    -------
+    float
+        QTc in milliseconds. Returns np.nan if inputs are invalid.
+    
+    Notes
+    -----
+    - Most commonly used formula in clinical practice
+    - Normal range: <440ms (males), <460ms (females)
+    - Less accurate at very high (>100 bpm) or very low (<50 bpm) heart rates
+    """
+    if not np.isfinite(qt_ms) or not np.isfinite(rr_ms) or rr_ms <= 0:
+        return np.nan
+    
+    rr_seconds = rr_ms / 1000.0
+    if rr_seconds <= 0:
+        return np.nan
+    
+    qtc = qt_ms / np.sqrt(rr_seconds)
+    return float(qtc) if np.isfinite(qtc) else np.nan
+
+
+def calc_qtc_fridericia(qt_ms: float, rr_ms: float) -> float:
+    """
+    Calculate QTc using Fridericia's formula.
+    
+    QTc = QT / (RR / 1000)^(1/3)
+    
+    Parameters
+    ----------
+    qt_ms : float
+        QT interval in milliseconds.
+    rr_ms : float
+        RR interval in milliseconds.
+    
+    Returns
+    -------
+    float
+        QTc in milliseconds. Returns np.nan if inputs are invalid.
+    
+    Notes
+    -----
+    - Often more accurate than Bazett at high heart rates
+    - Uses cube root instead of square root
+    - Preferred in some research settings
+    """
+    if not np.isfinite(qt_ms) or not np.isfinite(rr_ms) or rr_ms <= 0:
+        return np.nan
+    
+    rr_seconds = rr_ms / 1000.0
+    if rr_seconds <= 0:
+        return np.nan
+    
+    qtc = qt_ms / (rr_seconds ** (1.0 / 3.0))
+    return float(qtc) if np.isfinite(qtc) else np.nan
+
+
+def calc_qtc_framingham(qt_ms: float, rr_ms: float) -> float:
+    """
+    Calculate QTc using Framingham formula.
+    
+    QTc = QT + 0.154 × (1000 - RR)
+    
+    Parameters
+    ----------
+    qt_ms : float
+        QT interval in milliseconds.
+    rr_ms : float
+        RR interval in milliseconds.
+    
+    Returns
+    -------
+    float
+        QTc in milliseconds. Returns np.nan if inputs are invalid.
+    
+    Notes
+    -----
+    - Linear correction formula
+    - Alternative to power-based formulas (Bazett, Fridericia)
+    - Simple additive approach
+    """
+    if not np.isfinite(qt_ms) or not np.isfinite(rr_ms) or rr_ms <= 0:
+        return np.nan
+    
+    qtc = qt_ms + 0.154 * (1000.0 - rr_ms)
+    return float(qtc) if np.isfinite(qtc) else np.nan
+
+
+def calc_qtc_all_formulas(qt_ms: float, rr_ms: float) -> Dict[str, float]:
+    """
+    Calculate QTc using all three formulas (Bazett, Fridericia, Framingham).
+    
+    Parameters
+    ----------
+    qt_ms : float
+        QT interval in milliseconds.
+    rr_ms : float
+        RR interval in milliseconds.
+    
+    Returns
+    -------
+    Dict[str, float]
+        Dictionary with keys:
+        - 'QTc_Bazett_ms': QTc using Bazett's formula
+        - 'QTc_Fridericia_ms': QTc using Fridericia's formula
+        - 'QTc_Framingham_ms': QTc using Framingham formula
+        Values are np.nan if inputs are invalid.
+    """
+    return {
+        'QTc_Bazett_ms': calc_qtc_bazett(qt_ms, rr_ms),
+        'QTc_Fridericia_ms': calc_qtc_fridericia(qt_ms, rr_ms),
+        'QTc_Framingham_ms': calc_qtc_framingham(qt_ms, rr_ms),
+    }
 
 
 def interval_ms(

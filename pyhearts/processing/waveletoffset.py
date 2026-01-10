@@ -64,7 +64,7 @@ def calc_wavelet_dynamic_offset(
         lo_ms, hi_ms = hi_ms, lo_ms
     default_offset_samples = int(round(sampling_rate * (lo_ms / 1000.0)))
 
-    ref_energy = float(expected_max_energy) if expected_max_energy > 0 else 1.0
+    ref_energy = float(expected_max_energy) if (expected_max_energy is not None and expected_max_energy > 0) else 1.0
 
     # ---- Wavelet decomposition (choose requested detail level, clamp to available) ----
     try:

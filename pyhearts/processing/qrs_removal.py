@@ -1,8 +1,14 @@
 """
-QRS removal using sigmoid replacement (ECGPUWAVE approach).
+QRS removal using sigmoid replacement.
 
 This module implements QRS complex removal by replacing QRS regions
 with sigmoid functions, leaving only P and T waves for easier detection.
+This preprocessing step is essential for accurate T wave detection because
+the high-amplitude, rapid deflections of the QRS complex can create artifacts
+in derivative-based detection algorithms, particularly when T waves have low
+amplitude or occur in close proximity to the QRS complex. The sigmoid replacement
+preserves overall signal morphology while eliminating sharp transitions and
+high-frequency content that would otherwise interfere with T wave localization.
 """
 from __future__ import annotations
 
@@ -19,10 +25,16 @@ def remove_qrs_sigmoid(
     sampling_rate: float = 250.0,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Remove QRS complexes using sigmoid replacement (ECGPUWAVE approach).
+    Remove QRS complexes using sigmoid replacement.
     
     Replaces QRS regions with smooth sigmoid functions that connect
-    the signal before and after the QRS complex.
+    the signal before and after the QRS complex. The sigmoid function
+    is constructed using a logistic curve scaled to span the QRS region,
+    with endpoints matched to the mean signal values in windows immediately
+    before and after the QRS region. This approach eliminates the sharp
+    transitions and high-frequency content of the QRS complex that would
+    otherwise contaminate derivative-based T wave detection, while preserving
+    the overall signal baseline and morphology.
     
     Parameters
     ----------
@@ -51,7 +63,7 @@ def remove_qrs_sigmoid(
     if len(r_peaks) == 0:
         return replaced_signal, np.array([], dtype=int).reshape(0, 2)
     
-    # Remove baseline first (ECGPUWAVE approach: two-stage)
+    # Remove baseline first (two-stage approach)
     # Stage 1: 750ms window
     if len(signal) > 100:
         baseline_window1_ms = 750
@@ -147,7 +159,7 @@ def remove_baseline_wander(
     window2_ms: float = 2000.0,
 ) -> np.ndarray:
     """
-    Remove baseline wander using two-stage approach (ECGPUWAVE style).
+    Remove baseline wander using two-stage approach.
     
     Parameters
     ----------

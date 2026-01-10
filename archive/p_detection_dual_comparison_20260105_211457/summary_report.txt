@@ -1,0 +1,19 @@
+PyHEARTS P Peak Detection - Dual Comparison
+======================================================================
+
+Test Date: 2026-01-05 21:15:09
+Tolerance: ±15.0ms
+Subjects: ['sel117', 'sel123']
+
+Comparison with ECGPUWAVE:
+  Mean Precision: 41.41%
+  Mean Recall: 7.55%
+  Mean F1: 11.99%
+  Mean Timing Error: 4.40ms
+
+Comparison with QTDB Ground Truth:
+  Mean Precision: 0.42%
+  Mean Recall: 3.33%
+  Mean F1: 0.75%
+  Mean Timing Error: 6.00ms
+

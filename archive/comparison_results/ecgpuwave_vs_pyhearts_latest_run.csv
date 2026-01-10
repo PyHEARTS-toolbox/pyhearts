@@ -1,0 +1,2 @@
+subject,sampling_rate,R_mean_ms,R_std_ms,R_mae_ms,R_count,P_mean_ms,P_std_ms,P_mae_ms,P_count,T_mean_ms,T_std_ms,T_mae_ms,T_count,Q_on_mean_ms,Q_on_std_ms,Q_on_mae_ms,Q_on_count,Q_off_mean_ms,Q_off_std_ms,Q_off_mae_ms,Q_off_count
+sel117,250.0,-0.8333333333333334,11.632091624276157,8.833333333333334,48,4.666666666666667,2.7487370837451075,4.666666666666667,12,,,,0,122.18181818181819,20.810042076835632,122.18181818181819,44,151.91666666666666,11.38682230572789,151.91666666666666,48

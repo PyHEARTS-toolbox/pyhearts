@@ -1,0 +1,16 @@
+ECGpuwave P Wave Method Test Results
+============================================================
+
+Subjects processed: 5
+
+P Wave Detection:
+  Average Detection Rate: 32.0%
+  Average MAE: 3.83 ms
+  Average Median Error: 3.00 ms
+
+Per-subject results:
+  sel30: 0.0% detection, nan ms MAE, 0/0 matched
+  sel100: 100.0% detection, 0.00 ms MAE, 1/1 matched
+  sel117: 0.0% detection, nan ms MAE, 0/3 matched
+  sel213: 0.0% detection, nan ms MAE, 0/2 matched
+  sel301: 60.0% detection, 7.67 ms MAE, 12/20 matched

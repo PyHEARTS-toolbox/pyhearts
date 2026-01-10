@@ -12,7 +12,7 @@ def find_peak_derivative_based(
     cycle_idx: Optional[int] = None
 ) -> Tuple[Optional[int], Optional[float]]:
     """
-    Find peak using derivative-based method (ECGPUWAVE-style).
+    Find peak using derivative-based method.
     
     Finds peaks by locating zero-crossings in the first derivative:
     - Positive peaks: derivative goes from positive to negative (rising to falling)
@@ -76,6 +76,36 @@ def find_peak_derivative_based(
         # (signal transitions from falling to rising)
         sign_changes = np.diff(np.sign(deriv))
         zero_crossings = np.where(sign_changes > 0)[0]  # positive transition
+    
+    # If no zero-crossings found, try more lenient detection:
+    # Look for local maxima/minima in the derivative (not just zero-crossings)
+    # This helps detect small or noisy P waves
+    if len(zero_crossings) == 0:
+        # Fallback: find local extrema in derivative
+        # For positive peaks: find where derivative is maximum (most positive before going negative)
+        # For negative peaks: find where derivative is minimum (most negative before going positive)
+        if polarity == "positive":
+            # Find local maxima in derivative (where signal is rising fastest)
+            # These indicate potential positive peaks
+            local_maxima = []
+            for i in range(1, len(deriv) - 1):
+                if deriv[i] > deriv[i-1] and deriv[i] > deriv[i+1] and deriv[i] > 0:
+                    local_maxima.append(i)
+            if len(local_maxima) > 0:
+                # Use the largest local maximum
+                max_deriv_idx = local_maxima[np.argmax([deriv[i] for i in local_maxima])]
+                zero_crossings = np.array([max_deriv_idx])
+        else:
+            # Find local minima in derivative (where signal is falling fastest)
+            # These indicate potential negative peaks
+            local_minima = []
+            for i in range(1, len(deriv) - 1):
+                if deriv[i] < deriv[i-1] and deriv[i] < deriv[i+1] and deriv[i] < 0:
+                    local_minima.append(i)
+            if len(local_minima) > 0:
+                # Use the smallest local minimum
+                min_deriv_idx = local_minima[np.argmin([deriv[i] for i in local_minima])]
+                zero_crossings = np.array([min_deriv_idx])
     
     if len(zero_crossings) == 0:
         if verbose and label:
@@ -205,6 +235,10 @@ def find_peaks(
     if mode not in {"min", "max"}:
         raise ValueError("mode must be 'min' or 'max'")
 
+    # Validate search window - handle None values
+    if start_idx is None or end_idx is None:
+        return None, None, None
+    
     # Validate search window
     if (
         start_idx >= end_idx
@@ -216,7 +250,7 @@ def find_peaks(
             print(f"[Cycle {cycle_idx}]: Invalid segment for {label} peak (start={start_idx}, end={end_idx})")
         return None, None, None
 
-    # Use derivative-based detection if requested (ECGPUWAVE-style)
+    # Use derivative-based detection if requested
     if use_derivative:
         polarity = "positive" if mode == "max" else "negative"
         idx_absolute, amplitude = find_peak_derivative_based(
