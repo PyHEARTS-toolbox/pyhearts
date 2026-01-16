@@ -93,7 +93,10 @@ class ProcessCycleConfig:
     postQRS_refractory_window_ms: int = 20    # small fixed refractory after QRS to avoid S tail (~20 ms in humans)
     
     # ----- Skewed Gaussian fitting -----
-    use_skewed_gaussian: bool = False    # use skewed (asymmetric) Gaussian for P/T waves
+    # Note: when enabled, the curve-fit uses a skew-normal (alpha) parameter for *all* fitted components
+    # included in that cycle’s Gaussian mixture (e.g., P/Q/R/S/T if present). Components initialize with
+    # alpha=0 (symmetric) unless a previous-cycle seed is available.
+    use_skewed_gaussian: bool = True
     skew_bounds: Tuple[float, float] = (-3.0, 3.0)  # alpha bounds for skew parameter
     
     # ----- Physiological interval limits (RR/PP) -----
@@ -262,6 +265,14 @@ class ProcessCycleConfig:
             duration_min_ms=2, 
             # R-peak knobs can stay at defaults unless you want to tighten:
             rpeak_bpm_bounds=(300.0, 1000.0), rpeak_min_refrac_ms=67.0, # 900 bpm theoretical ceiling
+            # The prominence-based detector is less reliable on some mouse acquisitions;
+            # use a more robust detector by default.
+            rpeak_method="bandpass_energy",
+            # Mouse QRS complexes can contain higher-frequency content; a 40Hz low-pass
+            # may overly smooth at high sampling rates (e.g., 10kHz) and reduce detectability.
+            rpeak_lowpass_hz=150.0,
+            # Typical acquisition has mains interference; enable notch by default.
+            rpeak_notch_hz=50.0,
             version="v1-mouse",
         )
 

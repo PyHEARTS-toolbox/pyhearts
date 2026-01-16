@@ -7,9 +7,11 @@ is suitable for analysis.
 
 from __future__ import annotations
 
+import warnings
+from typing import Dict, Tuple
+
 import numpy as np
 from scipy import signal
-from typing import Tuple, Dict
 
 
 def assess_signal_quality(
@@ -48,6 +50,8 @@ def assess_signal_quality(
     reason : str
         Reason for rejection if is_acceptable is False, empty string otherwise.
     """
+    ecg = np.asarray(ecg, dtype=float)
+
     if ecg.size < 100:
         return False, {}, "Signal too short (< 100 samples)"
     
@@ -57,26 +61,46 @@ def assess_signal_quality(
     nyquist = sampling_rate / 2
     if nyquist > 40:
         # High-frequency noise estimate
-        b, a = signal.butter(4, 40 / nyquist, btype='high')
-        high_freq = signal.filtfilt(b, a, ecg)
-        noise_estimate = np.std(high_freq)
+        try:
+            # Use SOS+fs for numerical stability.
+            sos = signal.butter(4, 40.0, btype="highpass", fs=sampling_rate, output="sos")
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", category=RuntimeWarning)
+                high_freq = signal.sosfiltfilt(sos, ecg)
+            noise_estimate = float(np.std(high_freq))
+        except Exception:
+            # Fallback: use diff as noise proxy
+            noise_estimate = float(np.std(np.diff(ecg)))
     else:
         # For low sampling rates, use overall signal variation as noise proxy
-        noise_estimate = np.std(np.diff(ecg))
+        noise_estimate = float(np.std(np.diff(ecg)))
     
-    signal_power = np.std(ecg)
+    signal_power = float(np.std(ecg))
     snr_db = 20 * np.log10(signal_power / noise_estimate) if noise_estimate > 1e-9 else np.inf
     metrics['snr_db'] = snr_db
     
     # Calculate amplitude range
-    amplitude_range = np.max(ecg) - np.min(ecg)
+    amplitude_range = float(np.max(ecg) - np.min(ecg))
     metrics['amplitude_range_mv'] = amplitude_range
     
     # Calculate baseline wander
     if nyquist > 0.5:
-        b_low, a_low = signal.butter(4, 0.5 / nyquist, btype='low')
-        baseline = signal.filtfilt(b_low, a_low, ecg)
-        baseline_wander_std = np.std(baseline)
+        try:
+            # Very low cutoffs can be numerically unstable when expressed as normalized
+            # frequency at high sampling rates; use SOS+fs.
+            sos_low = signal.butter(4, 0.5, btype="lowpass", fs=sampling_rate, output="sos")
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", category=RuntimeWarning)
+                baseline = signal.sosfiltfilt(sos_low, ecg)
+            baseline_wander_std = float(np.std(baseline))
+        except Exception:
+            # Fallback: estimate baseline via moving-average baseline (2s window).
+            win = int(max(3, round(2.0 * sampling_rate)))
+            if win % 2 == 0:
+                win += 1
+            kernel = np.ones(win, dtype=float) / float(win)
+            baseline = np.convolve(ecg, kernel, mode="same")
+            baseline_wander_std = float(np.std(baseline))
     else:
         baseline_wander_std = 0.0
     metrics['baseline_wander_std_mv'] = baseline_wander_std

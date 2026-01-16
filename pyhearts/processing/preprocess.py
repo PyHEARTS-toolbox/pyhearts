@@ -2,6 +2,7 @@ from typing import Optional, Union
 
 import numpy as np
 from scipy import signal
+import warnings
 
 
 def preprocess_ecg(
@@ -100,18 +101,30 @@ def preprocess_ecg(
 
         # --- Step 2: High-Pass Filter ---
         if highpass_cutoff is not None and filter_order is not None:
-            b_hp, a_hp = signal.butter(filter_order, highpass_cutoff, btype="high", fs=sampling_rate)
-            ecg_processed = signal.filtfilt(b_hp, a_hp, ecg_processed)
+            # Use SOS filtering for numerical stability, especially when cutoff << fs.
+            sos_hp = signal.butter(
+                filter_order, highpass_cutoff, btype="highpass", fs=sampling_rate, output="sos"
+            )
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", category=RuntimeWarning)
+                ecg_processed = signal.sosfiltfilt(sos_hp, ecg_processed)
 
         # --- Step 3: Notch Filter ---
         if notch_frequency is not None and quality_factor is not None:
             b_notch, a_notch = signal.iirnotch(notch_frequency, quality_factor, sampling_rate)
-            ecg_processed = signal.filtfilt(b_notch, a_notch, ecg_processed)
+            sos_notch = signal.tf2sos(b_notch, a_notch)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", category=RuntimeWarning)
+                ecg_processed = signal.sosfiltfilt(sos_notch, ecg_processed)
 
         # --- Step 4: Low-Pass Filter ---
         if lowpass_cutoff is not None and filter_order is not None:
-            b_lp, a_lp = signal.butter(filter_order, lowpass_cutoff, btype="low", fs=sampling_rate)
-            ecg_processed = signal.filtfilt(b_lp, a_lp, ecg_processed)
+            sos_lp = signal.butter(
+                filter_order, lowpass_cutoff, btype="lowpass", fs=sampling_rate, output="sos"
+            )
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", category=RuntimeWarning)
+                ecg_processed = signal.sosfiltfilt(sos_lp, ecg_processed)
 
         return ecg_processed
 

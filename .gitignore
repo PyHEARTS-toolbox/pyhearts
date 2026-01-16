@@ -114,6 +114,17 @@ data/
 raw_data/
 results/
 
+# Mouse data (explicit; kept here for clarity)
+data/mouse_baseline/
+data/mouse/
+mouse_old_notebooks/
+
+# Local logs
+process_autoage.log
+
+# macOS Finder artifacts (some editors create these in directories)
+demo_fitting_plots/*.textClipping
+
 # Benchmark test data (large files - regenerate with generate_test_data.py)
 # Note: benchmark/ is now in dev/ which is ignored
 *.npy

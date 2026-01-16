@@ -2230,8 +2230,10 @@ def process_cycle(
                 "gauss_stdev_ms": float(r_stdev_ms) if r_stdev_ms is not None else None,
                 "gauss_fwhm_ms": float(r_fwhm_ms) if r_fwhm_ms is not None else None,
             }
+            # This fallback is expected in some edge cases (e.g., fit failure) and is primarily
+            # a robustness mechanism; keep logs at DEBUG to avoid per-cycle warning spam.
             if cycle_idx < 20 or cycle_idx % 10 == 0:
-                logging.warning(f"[FINAL_R_FALLBACK] Cycle {cycle_idx}: Added R to peak_data in final safety check: std={r_std_for_features:.2f}")
+                logging.debug(f"[FINAL_R_FALLBACK] Cycle {cycle_idx}: Added R to peak_data in final safety check: std={r_std_for_features:.2f}")
     elif "R" in peak_data and (peak_data["R"].get("gauss_stdev_samples") is None or (isinstance(peak_data["R"].get("gauss_stdev_samples"), float) and not np.isfinite(peak_data["R"].get("gauss_stdev_samples")))):
         # R is in peak_data but missing std - update it
         r_std_for_features = r_std
@@ -2248,8 +2250,9 @@ def process_cycle(
         peak_data["R"]["gauss_stdev_ms"] = float(r_stdev_ms) if r_stdev_ms is not None else None
         peak_data["R"]["gauss_fwhm_samples"] = float(r_fwhm_samples) if r_fwhm_samples is not None else None
         peak_data["R"]["gauss_fwhm_ms"] = float(r_fwhm_ms) if r_fwhm_ms is not None else None
+        # This fallback is expected in some edge cases; keep logs at DEBUG to avoid warning spam.
         if cycle_idx < 20 or cycle_idx % 10 == 0:
-            logging.warning(f"[FINAL_R_FALLBACK] Cycle {cycle_idx}: Updated R std in peak_data in final safety check: std={r_std_for_features:.2f}")
+            logging.debug(f"[FINAL_R_FALLBACK] Cycle {cycle_idx}: Updated R std in peak_data in final safety check: std={r_std_for_features:.2f}")
 
     if "peak_data" not in locals() or not peak_data:
         # CRITICAL: If peak_data is missing, we still need to assign R peak to output_dict!
@@ -2260,8 +2263,9 @@ def process_cycle(
             )
             if r_global_center_idx is not None:
                 output_dict["R_global_center_idx"][cycle_idx] = r_global_center_idx
+                # Debug-level: this is a robustness path and can happen in noisy/failed-fit cycles.
                 if cycle_idx < 20 or cycle_idx % 10 == 0:
-                    logging.warning(f"[EARLY_RETURN] Cycle {cycle_idx}: peak_data missing but assigned R={r_global_center_idx} before early return")
+                    logging.debug(f"[EARLY_RETURN] Cycle {cycle_idx}: peak_data missing but assigned R={r_global_center_idx} before early return")
         
         if verbose:
             print(f"[Cycle {cycle_idx}]: peak_data missing or empty — skipping shape feature extraction.")
