@@ -114,6 +114,17 @@ data/
 raw_data/
 results/
 
+# Mouse data (explicit; kept here for clarity)
+data/mouse_baseline/
+data/mouse/
+mouse_old_notebooks/
+
+# Local logs
+process_autoage.log
+
+# macOS Finder artifacts (some editors create these in directories)
+demo_fitting_plots/*.textClipping
+
 # Benchmark test data (large files - regenerate with generate_test_data.py)
 # Note: benchmark/ is now in dev/ which is ignored
 *.npy
@@ -195,6 +206,13 @@ pyhearts.egg-info/
 
 # Development and non-essential files (benchmarks, analysis, external tools)
 dev/
+
+# Cluster/HPC helper scripts (site-specific, not part of the toolbox)
+cluster_scripts/
+# Common scheduler artifacts under cluster scripts
+cluster_scripts/**/*.out
+cluster_scripts/**/*.err
+cluster_scripts/**/*.log
 
 # Analysis folder (contains all non-toolbox analysis scripts, results, and documentation)
 analysis/

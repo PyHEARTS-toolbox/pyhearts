@@ -1,6 +1,8 @@
 import numpy as np
 import pyhearts as ph
-from scipy.signal import find_peaks, butter, filtfilt, iirnotch
+import warnings
+from scipy import signal as sp_signal
+from scipy.signal import find_peaks
 from typing import Optional, Union, Literal
 from pyhearts.config import ProcessCycleConfig
 
@@ -22,26 +24,28 @@ def _bandpass_filter(
     
     # Highpass to remove baseline wander
     if highpass_hz > 0:
-        nyq = sampling_rate / 2
-        # Ensure cutoff is valid
-        hp_norm = min(highpass_hz / nyq, 0.99)
-        b, a = butter(order, hp_norm, btype='high')
-        filtered = filtfilt(b, a, filtered)
+        sos_hp = sp_signal.butter(order, highpass_hz, btype="highpass", fs=sampling_rate, output="sos")
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            filtered = sp_signal.sosfiltfilt(sos_hp, filtered)
     
     # Lowpass to remove high-frequency noise
     # For low-SNR signals, use slightly lower cutoff to reduce noise
     if lowpass_hz > 0:
-        nyq = sampling_rate / 2
-        lp_norm = min(lowpass_hz / nyq, 0.99)
-        b, a = butter(order, lp_norm, btype='low')
-        filtered = filtfilt(b, a, filtered)
+        sos_lp = sp_signal.butter(order, lowpass_hz, btype="lowpass", fs=sampling_rate, output="sos")
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            filtered = sp_signal.sosfiltfilt(sos_lp, filtered)
     
     # Optional notch filter for power line interference
     # Use higher Q factor for better noise rejection in low-SNR signals
     if notch_hz is not None and notch_hz > 0:
         q = 35.0  # Increased from 30.0 for better noise rejection
-        b, a = iirnotch(notch_hz, q, sampling_rate)
-        filtered = filtfilt(b, a, filtered)
+        b, a = sp_signal.iirnotch(notch_hz, q, sampling_rate)
+        sos_notch = sp_signal.tf2sos(b, a)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            filtered = sp_signal.sosfiltfilt(sos_notch, filtered)
     
     return filtered
 

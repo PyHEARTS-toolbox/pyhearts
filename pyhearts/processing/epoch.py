@@ -1,7 +1,7 @@
 from typing import List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
-from scipy.signal import detrend, find_peaks
+from scipy.signal import find_peaks
 import pywt
 from pyhearts.config import ProcessCycleConfig   
 
@@ -116,7 +116,17 @@ def epoch_ecg(
 
     # --- Window size from RR ---
     rr_intervals_samples = np.diff(r_peaks)
-    avg_rr_interval = float(np.mean(rr_intervals_samples))
+    # Clamp RR to physiologic bounds to avoid pathological window sizes when a few
+    # spurious peaks slip through (especially at high sampling rates).
+    min_rr = int(round(cfg.rr_bounds_ms[0] * sampling_rate / 1000.0))
+    max_rr = int(round(cfg.rr_bounds_ms[1] * sampling_rate / 1000.0))
+    if min_rr < 1:
+        min_rr = 1
+    if max_rr < min_rr:
+        max_rr = min_rr
+    rr_clipped = np.clip(rr_intervals_samples, min_rr, max_rr)
+    avg_rr_interval = float(np.median(rr_clipped))
+
     pre_r = cfg.pre_r_window if cfg.pre_r_window is not None else int(round(avg_rr_interval / 2))
 
     if pre_r <= 1:
@@ -139,7 +149,16 @@ def epoch_ecg(
         if window.size != 2 * pre_r:
             continue
 
-        window_detrended = detrend(window, type="linear")
+        # Numerically stable linear detrend (avoids SciPy detrend instabilities on large windows)
+        n = window.size
+        x = np.arange(n, dtype=float)
+        x_mean = (n - 1) / 2.0
+        y = window.astype(float, copy=False)
+        y_mean = float(np.mean(y))
+        denom = float(np.sum((x - x_mean) ** 2))
+        slope = float(np.dot(x - x_mean, y - y_mean) / denom) if denom > 0 else 0.0
+        trend = slope * (x - x_mean) + y_mean
+        window_detrended = y - trend
 
         x_vals = np.linspace(-pre_r / sampling_rate, pre_r / sampling_rate, window_detrended.size)
         r_peak_lat = x_vals[int(np.argmax(window_detrended))]

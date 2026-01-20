@@ -33,7 +33,7 @@ PyHEARTS currently extracts **167 features** per ECG recording:
 
 - `{Wave}_gauss_skew_alpha`: Skew parameter from skewed Gaussian fit (if enabled)
   - Already supported in `gaussian.py` via `skewed_gaussian_function()`
-  - Requires: `cfg.use_skewed_gaussian = True`
+  - Enabled by default (`cfg.use_skewed_gaussian = True`); set to `False` to disable
   - Units: Dimensionless (alpha parameter)
 
 **Implementation**: Add to `extract_shape_features()` in `shape.py`

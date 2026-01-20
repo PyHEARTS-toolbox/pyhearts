@@ -45,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Configuration
 - Added `t_wave_use_qrs_removal: bool = True` to `ProcessCycleConfig` (enabled by default in `for_human()` preset)
 - Updated `for_human()` preset: `snr_mad_multiplier` for T-waves reduced from 1.5 to 0.8
+- Defaulted `use_skewed_gaussian` to `True` (skew-normal/alpha parameter enabled for all fitted Gaussian components; alpha initializes at 0 for symmetry)
 
 ### Validation
 - T-wave detection evaluation on QTDB dataset:
