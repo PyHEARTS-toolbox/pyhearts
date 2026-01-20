@@ -207,6 +207,13 @@ pyhearts.egg-info/
 # Development and non-essential files (benchmarks, analysis, external tools)
 dev/
 
+# Cluster/HPC helper scripts (site-specific, not part of the toolbox)
+cluster_scripts/
+# Common scheduler artifacts under cluster scripts
+cluster_scripts/**/*.out
+cluster_scripts/**/*.err
+cluster_scripts/**/*.log
+
 # Analysis folder (contains all non-toolbox analysis scripts, results, and documentation)
 analysis/
 
