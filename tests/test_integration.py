@@ -13,6 +13,9 @@ import pytest
 
 from pyhearts import PyHEARTS, ProcessCycleConfig
 
+# These are end-to-end tests; keep them opt-in for CI speed/stability.
+pytestmark = [pytest.mark.integration, pytest.mark.slow]
+
 # Check if simulation module is available
 try:
     from pyhearts import generate_ecg_signal

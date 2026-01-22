@@ -10,6 +10,9 @@ Note: These tests require Python 3.10+ due to neurokit2 dependency.
 import numpy as np
 import pytest
 
+# These tests depend on neurokit2 and can be slow; keep them opt-in for CI.
+pytestmark = [pytest.mark.integration, pytest.mark.slow]
+
 # Check if simulation module is available
 try:
     from pyhearts import generate_ecg_signal
