@@ -6,20 +6,16 @@
 
 ## P-Wave Detection
 - **Derivative-validated method**: New robust P-wave detection method (`p_wave_detection_derivative_validated.py`) with multi-stage validation (amplitude, derivative extrema, sign, noise level, temporal ordering)
-- **Multiple detection methods**: Added `p_wave_detection_fixed_window.py` and `p_wave_detection_improved.py` as alternatives
+- **Breaking change (cleanup)**: Removed legacy/alternate P-wave detectors (`p_wave_detection_fixed_window.py`, `p_wave_detection_improved.py`) to reduce maintenance surface area. The pipeline now uses the derivative-validated method when enabled, otherwise the standard method.
 - **Training phase**: New adaptive training phase (`p_training_phase.py`) that learns P-wave characteristics from initial recording segment
 - **Fallback methods**: Enhanced fallback detection with parabolic interpolation for sub-sample accuracy
 
 ## T-Wave Detection
-- **QRS removal**: New `qrs_removal.py` module implementing sigmoid-based QRS replacement to reduce interference with T-wave detection
-- **Derivative-based detection**: Enhanced `derivative_t_detection.py` with QRS-removed signal processing
+- **Derivative-based detection**: Enhanced `derivative_t_detection.py` with improved robustness
 - **Improved accuracy**: T-wave detection accuracy improved through QRS artifact elimination
 
 ## R-Peak Detection
-- **Multiple algorithms**: Added support for three detection methods:
-  - Prominence-based (default, optimized)
-  - Pan-Tompkins algorithm (`pan_tompkins.py`)
-  - Bandpass energy-based (`bandpass_energy_rpeak.py`)
+- **Breaking change (cleanup)**: Removed legacy alternate R-peak detectors (`pan_tompkins.py`, `bandpass_energy_rpeak.py`). PyHEARTS now uses the unified `pyhearts.processing.r_peak_detection`.
 - **Enhanced dual-polarity handling**: Improved detection for mixed-polarity signals (both inverted and upright R-peaks)
 - **Optimized parameters**: R-peak prominence multiplier lowered from 3.0σ to 2.5σ for better recall (based on QTDB benchmark)
 

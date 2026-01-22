@@ -397,34 +397,19 @@ class PyHEARTS:
                 # Continue anyway but log the warning
                 # (Don't fail completely - let user decide)
             
-            # Use requested R-peak detector
-            if self.cfg.rpeak_method == "pan_tompkins":
-                from pyhearts.processing.pan_tompkins import pan_tompkins_r_peak_detection
-                filtered_r_peaks = pan_tompkins_r_peak_detection(
-                    ecg_signal,
-                    self.sampling_rate,
-                    cfg=self.cfg,
-                    plot=self.plot,
-                    raw_ecg=raw_ecg,
-                )
-            elif self.cfg.rpeak_method == "bandpass_energy":
-                from pyhearts.processing.bandpass_energy_rpeak import bandpass_energy_r_peak_detection
-                filtered_r_peaks = bandpass_energy_r_peak_detection(
-                    ecg_signal,
-                    self.sampling_rate,
-                    cfg=self.cfg,
-                    plot=self.plot,
-                    raw_ecg=raw_ecg,
-                )
-            else:
-                filtered_r_peaks = r_peak_detection(
-                    ecg_signal, 
-                    self.sampling_rate, 
-                    cfg=self.cfg,
-                    plot=self.plot,
-                    sensitivity=self.sensitivity,
-                    raw_ecg=raw_ecg,
-                )
+            # R-peak detection
+            #
+            # BREAKING CHANGE NOTE:
+            # Legacy alternate detectors (pan_tompkins, bandpass_energy) were removed.
+            # Use the unified `pyhearts.processing.r_peak_detection`.
+            filtered_r_peaks = r_peak_detection(
+                ecg_signal,
+                self.sampling_rate,
+                cfg=self.cfg,
+                plot=self.plot,
+                sensitivity=self.sensitivity,
+                raw_ecg=raw_ecg,
+            )
             self.r_peak_indices = filtered_r_peaks
         
             # Handle no R-peaks case

@@ -32,13 +32,7 @@ from .derivative_t_detection import (
     compute_filtered_derivative,
     detect_t_wave_derivative_based,
 )
-from .p_wave_detection_fixed_window import detect_p_wave_fixed_window
-from .p_wave_detection_improved import detect_p_wave_improved
-from .p_wave_detection_derivative_validated import (
-    detect_p_wave_derivative_validated,
-    thresholdcross,
-    bandpass_filter_p_wave,
-)
+from .p_wave_detection_derivative_validated import detect_p_wave_derivative_validated
 
 
 def bandpass_filter_pwave(
@@ -633,12 +627,14 @@ def process_cycle(
         # Initialize p_peak_end_idx for use in standard method (if needed)
         p_peak_end_idx = None
         
-        # Try derivative-validated P wave detection first (if enabled), then improved, then fixed-window, then standard
-        use_derivative_validated = cfg is not None and hasattr(cfg, 'p_use_derivative_validated_method') and cfg.p_use_derivative_validated_method
-        use_improved = cfg is not None and hasattr(cfg, 'p_use_improved_method') and cfg.p_use_improved_method
-        use_fixed_window = cfg is not None and cfg.p_use_fixed_window_method
-        
-        if use_derivative_validated or use_improved or use_fixed_window:
+        # Try derivative-validated P wave detection first (if enabled), else fall back to standard method.
+        use_derivative_validated = (
+            cfg is not None
+            and hasattr(cfg, "p_use_derivative_validated_method")
+            and cfg.p_use_derivative_validated_method
+        )
+
+        if use_derivative_validated:
             # Get cycle start global index for converting results to global indices
             # Use "index" column (same as xs_samples) for consistency with global index conversion
             cycle_start_global = int(one_cycle["index"].iloc[0]) if "index" in one_cycle.columns and not one_cycle.empty else (int(one_cycle["signal_x"].iloc[0]) if not one_cycle.empty else 0)
@@ -690,7 +686,7 @@ def process_cycle(
                 if r_center_idx is not None:
                     # Calculate derivative from cycle segment for accurate QRS region extraction
                     # Use the filtered signal for derivative calculation (same as P detection uses)
-                    Xpb_cycle = bandpass_filter_p_wave(sig_detrended, sampling_rate, lowcut=1.0, highcut=60.0, order=2)
+                    Xpb_cycle = bandpass_filter_pwave(sig_detrended, sampling_rate, lowcut=1.0, highcut=60.0, order=2)
                     cycle_derivative = np.diff(Xpb_cycle)
                     
                     # Calculate dermax from QRS region (±70ms around R peak) using cycle-relative indices
@@ -719,7 +715,7 @@ def process_cycle(
                 # Safety check: ensure dermax is not zero (would break validation)
                 if max_derivative is not None and max_derivative == 0.0:
                     # Calculate from entire cycle derivative as last resort
-                    Xpb_cycle = bandpass_filter_p_wave(sig_detrended, sampling_rate, lowcut=1.0, highcut=60.0, order=2)
+                    Xpb_cycle = bandpass_filter_pwave(sig_detrended, sampling_rate, lowcut=1.0, highcut=60.0, order=2)
                     cycle_derivative = np.diff(Xpb_cycle)
                     if len(cycle_derivative) > 0:
                         max_derivative = float(np.max(np.abs(cycle_derivative)))
@@ -773,38 +769,7 @@ def process_cycle(
                         p_peak_idx_global = p_peak_idx + cycle_start_global
                     else:
                         p_peak_idx_global = None
-                elif use_improved:
-                    if verbose:
-                        print(f"[Cycle {cycle_idx}]: Using improved P wave detection")
-                    
-                    # Call improved P wave detection
-                    p_peak_idx, p_amplitude, p_onset_idx, p_offset_idx = detect_p_wave_improved(
-                        signal=sig_detrended,
-                        qrs_onset_idx=qrs_onset_idx,
-                        r_peak_idx=r_center_idx,
-                        r_amplitude=r_height,
-                        sampling_rate=sampling_rate,
-                        previous_t_end_idx=previous_t_end_idx,
-                        previous_p_end_idx=previous_p_end_idx,
-                        max_derivative=max_derivative,
-                        verbose=verbose,
-                        cycle_idx=cycle_idx,
-                    )
-                elif use_fixed_window:
-                    if verbose:
-                        print(f"[Cycle {cycle_idx}]: Using fixed-window P wave detection")
-                    
-                    # Call fixed-window P wave detection
-                    p_peak_idx, p_amplitude, p_onset_idx, p_offset_idx = detect_p_wave_fixed_window(
-                        signal=sig_detrended,
-                        qrs_onset_idx=qrs_onset_idx,
-                        r_peak_idx=r_center_idx,
-                        r_amplitude=r_height,
-                        sampling_rate=sampling_rate,
-                        previous_t_end_idx=previous_t_end_idx,
-                        verbose=verbose,
-                        cycle_idx=cycle_idx,
-                    )
+                # NOTE: legacy P-wave detection fallbacks (improved/fixed-window) removed.
                 
                 if p_peak_idx is not None:
                     p_center_idx = p_peak_idx  # Already cycle-relative from derivative-validated detection

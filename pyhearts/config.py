@@ -16,8 +16,13 @@ class ProcessCycleConfig:
     - threshold_fraction: 0.15 captures more of P/T wave boundaries vs 0.30
     - epoch_corr_thresh: 0.70 retains more beats with morphological variation
     """
-    #  ----  R-peak detection  ---- 
-    rpeak_method: str = "prominence"  # "prominence", "pan_tompkins", or "bandpass_energy"
+    #  ----  R-peak detection  ----
+    #
+    # BREAKING CHANGE NOTE:
+    # Historically PyHEARTS exposed multiple R-peak detection algorithms via
+    # `rpeak_method` (e.g., pan_tompkins, bandpass_energy). Those legacy paths
+    # have been removed to reduce maintenance surface area. PyHEARTS now uses
+    # the unified `pyhearts.processing.r_peak_detection`.
     rpeak_prominence_multiplier: float = 2.5          # σ multiplier (lowered from 3.0 for better recall)
     rpeak_min_refrac_ms: float = 100.0                # first-pass refractory
     rpeak_rr_frac_second_pass: float = 0.50           # second-pass refractory = k * median RR (lowered for sensitivity)
@@ -56,8 +61,6 @@ class ProcessCycleConfig:
     p_use_training_phase: bool = False   # Enable training-phase adaptive thresholds
     p_use_training_as_primary: bool = False  # Use training thresholds as PRIMARY validation (vs secondary check)
     p_safety_margin_ms: float = 60.0     # Safety margin before Q/R peak (adjustable, default 60ms)
-    p_use_fixed_window_method: bool = False  # Use fixed-window P wave detection (1-60 Hz filter, fixed search window, derivative zero-crossing)
-    p_use_improved_method: bool = False  # Use improved P wave detection (deprecated in favor of derivative-validated method)
     p_use_derivative_validated_method: bool = False  # Use derivative-validated P wave detection (derivative-based with comprehensive validation)
     p_enable_distance_validation: bool = False  # Enable distance-based validation (P-R, P-Q distances). Disabled by default to support abnormal cycles
     p_enable_morphology_validation: bool = False  # Enable morphology-based validation (duration, sharpness). Disabled by default to support abnormal cycles
@@ -215,8 +218,6 @@ class ProcessCycleConfig:
             raise ValueError("sharp_amp_norm ∈ {'p2p','rms','mad'}")
         
         # r-peak
-        if self.rpeak_method not in {"prominence", "pan_tompkins", "bandpass_energy", "derivative_based"}:
-            raise ValueError("rpeak_method must be 'prominence', 'pan_tompkins', 'bandpass_energy', or 'derivative_based'")
         lo_bpm, hi_bpm = self.rpeak_bpm_bounds
         if not (0 < lo_bpm < hi_bpm):
             raise ValueError("rpeak_bpm_bounds require 0 < low < high")
@@ -265,9 +266,6 @@ class ProcessCycleConfig:
             duration_min_ms=2, 
             # R-peak knobs can stay at defaults unless you want to tighten:
             rpeak_bpm_bounds=(300.0, 1000.0), rpeak_min_refrac_ms=67.0, # 900 bpm theoretical ceiling
-            # The prominence-based detector is less reliable on some mouse acquisitions;
-            # use a more robust detector by default.
-            rpeak_method="bandpass_energy",
             # Mouse QRS complexes can contain higher-frequency content; a 40Hz low-pass
             # may overly smooth at high sampling rates (e.g., 10kHz) and reduce detectability.
             rpeak_lowpass_hz=150.0,
@@ -322,8 +320,6 @@ class ProcessCycleConfig:
             pwave_bandpass_low_hz=1.0,   # Established method uses 1-60 Hz
             pwave_bandpass_high_hz=60.0,
             pwave_bandpass_order=2,      # Established method uses order 2
-            p_use_fixed_window_method=False,
-            p_use_improved_method=False,
             p_use_derivative_validated_method=True,
             p_enable_distance_validation=False,  # Disabled to support abnormal cycles
             p_enable_morphology_validation=False,  # Disabled to support abnormal cycles
