@@ -15,6 +15,12 @@ PyHEARTS bridges this gap by providing a transparent and physiologically interpr
 
 ---
 
+## Tutorials
+
+Tutorials live in a separate repository: [PyHEARTS-toolbox/tutorials](https://github.com/PyHEARTS-toolbox/tutorials).
+
+---
+
 ## Key Features  
 
 - **Beat-level phenotyping**: Extracts over 130 features per cardiac cycle.  
