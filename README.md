@@ -19,8 +19,8 @@ PyHEARTS bridges this gap by providing a transparent and physiologically interpr
 
 Beginner-friendly visual summary:
 
-- `documentation/PYHEARTS_FLOWCHART.md` (Mermaid in Markdown)
-- `documentation/pyhearts_flowchart.html` (standalone HTML, colored)
+- `docs/PYHEARTS_FLOWCHART.md` (Mermaid in Markdown)
+- `docs/pyhearts_flowchart.html` (standalone HTML, colored + clickable step details)
 
 ---
 
