@@ -15,6 +15,15 @@ PyHEARTS bridges this gap by providing a transparent and physiologically interpr
 
 ---
 
+## Flow chart (what PyHEARTS does)
+
+Beginner-friendly visual summary:
+
+- `documentation/PYHEARTS_FLOWCHART.md` (Mermaid in Markdown)
+- `documentation/pyhearts_flowchart.html` (standalone HTML, colored)
+
+---
+
 ## Tutorials
 
 Tutorials live in a separate repository: [PyHEARTS-toolbox/tutorials](https://github.com/PyHEARTS-toolbox/tutorials).
@@ -39,33 +48,3 @@ Tutorials live in a separate repository: [PyHEARTS-toolbox/tutorials](https://gi
 - **Robust peak detection**: Improved P, R, and T wave detection with reduced false positives and enhanced timing accuracy.
 
 ---
-
-## Testing & Coverage
-
-PyHEARTS uses `pytest`. The repository is configured to run tests from `tests/` (see `pyproject.toml`).
-
-- **Run unit tests**:
-
-```bash
-python3 -m pytest
-```
-
-- **Run tests with coverage** (prints a per-file summary + missing lines):
-
-```bash
-python3 -m pytest --cov=pyhearts --cov-report=term-missing
-```
-
-- **Generate HTML coverage report** (outputs to `htmlcov/`):
-
-```bash
-python3 -m pytest --cov=pyhearts --cov-report=html
-open htmlcov/index.html
-```
-
-- **Makefile shortcuts**:
-
-```bash
-make test
-make coverage
-```
