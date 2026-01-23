@@ -286,3 +286,4 @@ pyhearts/processing/qrs_boundary_detection.py
 # Verification/utility scripts
 verify_*.py
 
+documentation/
