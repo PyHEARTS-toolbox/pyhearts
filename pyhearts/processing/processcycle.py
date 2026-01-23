@@ -1576,8 +1576,11 @@ def process_cycle(
             else:
                 if verbose:
                     print(f"[Cycle {cycle_idx}]: Skipping {comp}. No std estimate available.")
-                if cycle_idx < 20 or cycle_idx % 10 == 0 and comp == "R":
-                    logging.warning(f"[R_SKIPPED] Cycle {cycle_idx}: R skipped from Gaussian fit - std_guess=None, r_std={r_std}")
+                # Only emit the R-specific warning when R is actually the component being skipped.
+                if comp == "R" and (cycle_idx < 20 or cycle_idx % 10 == 0):
+                    logging.warning(
+                        f"[R_SKIPPED] Cycle {cycle_idx}: R skipped from Gaussian fit - std_guess=None, r_std={r_std}"
+                    )
 
 
     # Build guess array for curve fitting
