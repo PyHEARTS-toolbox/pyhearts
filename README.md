@@ -15,6 +15,26 @@ PyHEARTS bridges this gap by providing a transparent and physiologically interpr
 
 ---
 
+## Quickstart (run on a 2-column monitor CSV)
+
+If your device export is two columns `(time, value)` (often `MM:SS.s` plus ADC counts), you can load it and run PyHEARTS like this:
+
+```python
+import pyhearts
+
+# Load the monitor export. If values look like unsigned ADC with midpoint ~8192,
+# keep adc_midpoint=8192.0. If you know the scaling, set mv_per_count to convert to mV.
+loaded = pyhearts.load_monitor_csv(
+    "/path/to/ecg.csv",
+    sampling_rate_hz=500.0,
+    adc_midpoint=8192.0,
+    mv_per_count=None,
+)
+
+analyzer = pyhearts.PyHEARTS(sampling_rate=loaded.sampling_rate_hz, species="human", sensitivity="high")
+features_df, cycles_df = analyzer.analyze_ecg(loaded.ecg)
+```
+
 ## Flow chart (what PyHEARTS does)
 
 Beginner-friendly visual summary:

@@ -77,3 +77,5 @@ def test_plots_smoke(monkeypatch, simple_ecg_signal, sampling_rate, sample_epoch
     )
 
 
+
+

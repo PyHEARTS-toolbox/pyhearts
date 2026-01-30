@@ -115,6 +115,7 @@ raw_data/
 results/
 
 # Non-toolbox research/analysis folders (keep locally, don't ship in the toolbox repo)
+advancement/
 analysis_scripts/
 figure_scripts/
 demo_fitting_plots/

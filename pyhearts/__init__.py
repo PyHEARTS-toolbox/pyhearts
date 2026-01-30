@@ -13,8 +13,12 @@ from .core.fit import PyHEARTS
 # Submodules
 from . import feature
 from . import fitmetrics
+from . import io
 from . import plots
 from . import processing
+
+# I/O helpers
+from .io import load_monitor_csv
 
 # Signal generation (optional - requires neurokit2 which needs Python 3.10+)
 try:
@@ -30,11 +34,14 @@ __all__ = [
     # Core
     "PyHEARTS",
     "ProcessCycleConfig",
+    # I/O
+    "load_monitor_csv",
     # Utilities (optional)
     "generate_ecg_signal",
     # Submodules
     "feature",
     "fitmetrics",
+    "io",
     "plots",
     "processing",
 ]
