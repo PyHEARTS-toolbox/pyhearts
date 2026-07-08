@@ -910,9 +910,9 @@ class ProcessCycleConfig:
         )
 
     @classmethod
-    def _for_human_unified_v321_base(cls) -> "ProcessCycleConfig":
+    def _for_human_unified_base(cls) -> "ProcessCycleConfig":
         """
-        v3.2.1 human_unified baseline (kept for explicit compatibility/legacy use).
+        Production human_unified baseline.
 
         Derivative R + per-cycle P + record STPQ T with threshold apex on delineated
         trace, w1 floor (40% S→Q), fixed-window morphology classification,
@@ -961,22 +961,22 @@ class ProcessCycleConfig:
             record_qs_search_window_ms=150.0,
             record_s_search_after_r_ms=200.0,
             record_q_search_before_r_ms=150.0,
-            version="v3.2.1-human-unified",
+            version="human-unified",
         )
 
     @classmethod
     def for_human_unified(cls) -> "ProcessCycleConfig":
         """
-        Production human preset (default): v3.2.1 signed-polarity STPQ pipeline.
+        Production human preset (default): signed-polarity STPQ pipeline.
 
-        Archived experimental fill-missing-T sprint: :meth:`for_human_unified_v33a`.
+        Archived experimental fill-missing-T variant: :meth:`for_human_unified_v33a`.
         """
-        return cls._for_human_unified_v321_base()
+        return cls._for_human_unified_base()
 
     @classmethod
     def for_human_unified_v321(cls) -> "ProcessCycleConfig":
-        """Explicit alias for :meth:`for_human_unified` (v3.2.1)."""
-        return cls._for_human_unified_v321_base()
+        """Deprecated alias for :meth:`for_human_unified`."""
+        return cls._for_human_unified_base()
 
     @classmethod
     def for_human_unified_template_prior_phase1(cls) -> "ProcessCycleConfig":
@@ -987,14 +987,14 @@ class ProcessCycleConfig:
         template-projected w1/w2 bounds (see ``template_prior_windows``).
         """
         return replace(
-            cls.for_human_unified_v321(),
+            cls.for_human_unified(),
             record_template_prior_windows=True,
             record_delineation_overwrite_existing_t=False,
             record_delineation_replace_t=False,
             record_delineation_replace_p=False,
             record_delineation_map_all_beats=False,
             record_fiducial_smoothing=False,
-            version="v3.2.1-human-unified-template-prior-phase1",
+            version="human-unified-template-prior-phase1",
         )
 
     @classmethod
@@ -1003,7 +1003,7 @@ class ProcessCycleConfig:
         return replace(
             cls.for_human_unified_template_prior_phase1(),
             record_template_prior_uncertainty_windows=True,
-            version="v3.2.1-human-unified-template-prior-phase1-uncertainty",
+            version="human-unified-template-prior-phase1-uncertainty",
         )
 
     @classmethod
@@ -1020,7 +1020,7 @@ class ProcessCycleConfig:
             record_template_prior_cluster_k=0,
             # LOO ablation: neighborhood +1.6 pp holdout; shape/stability need learned weights.
             record_template_prior_evidence_neighborhood=True,
-            version="v3.2.1-human-unified-template-prior-ensemble",
+            version="human-unified-template-prior-ensemble",
         )
 
     @classmethod
@@ -1033,7 +1033,7 @@ class ProcessCycleConfig:
             cls.for_human_unified_template_prior_ensemble(),
             record_inverted_dzc_rescue=True,
             record_inverted_dzc_rescue_volt_percentile_min=95.0,
-            version="v3.2.1-human-unified-template-prior-ensemble-inv-dzc",
+            version="human-unified-template-prior-ensemble-inv-dzc",
         )
 
     @classmethod
@@ -1050,7 +1050,7 @@ class ProcessCycleConfig:
             record_template_prior_rescue=False,
             record_template_prior_evidence_local_shape=True,
             record_template_prior_evidence_stability=True,
-            version="v3.2.1-human-unified-template-prior-ranked",
+            version="human-unified-template-prior-ranked",
         )
 
     @classmethod
@@ -1070,33 +1070,33 @@ class ProcessCycleConfig:
             record_template_prior_cluster_k=2,
             record_template_detect_biphasic_positive_negative=True,
             record_template_t_morphology_sq_frac=(0.20, 0.60),
-            version="v3.2.1-human-unified-template-prior-phase2",
+            version="human-unified-template-prior-phase2",
         )
 
     @classmethod
-    def for_human_unified_v321_biphasic_positive_negative_lobe_search(cls) -> "ProcessCycleConfig":
+    def for_human_unified_biphasic_positive_negative_lobe_search(cls) -> "ProcessCycleConfig":
         """
-        v3.2.1 + biphasic +− template classify and positive-lobe-only STPQ T search.
+        Production + biphasic +− template classify and positive-lobe-only STPQ T search.
 
         Ablation preset: does not change routing, R-centered windows, or other morphologies.
         """
         return replace(
-            cls._for_human_unified_v321_base(),
+            cls._for_human_unified_base(),
             record_template_detect_biphasic_positive_negative=True,
             record_biphasic_pm_lobe_search=True,
-            version="v3.2.1-human-unified-biphasic-pm-lobe",
+            version="human-unified-biphasic-pm-lobe",
         )
 
     @classmethod
-    def for_human_unified_v321_biphasic_pm_early_guardrail(cls) -> "ProcessCycleConfig":
+    def for_human_unified_biphasic_pm_early_guardrail(cls) -> "ProcessCycleConfig":
         """
-        v3.2.1 + biphasic +− classify-only early-T guardrail (no STPQ override / lobe search).
+        Production + biphasic +− classify-only early-T guardrail (no STPQ override / lobe search).
 
         If ``T < first_positive_peak - margin``, clamp ``T`` to the template positive apex.
         Never shifts T later.
         """
         return replace(
-            cls._for_human_unified_v321_base(),
+            cls._for_human_unified_base(),
             record_template_detect_biphasic_positive_negative=True,
             record_biphasic_pm_lobe_search=False,
             record_biphasic_pm_early_t_guardrail=True,
@@ -1104,49 +1104,63 @@ class ProcessCycleConfig:
             record_biphasic_pm_early_guardrail_max_uplift_ms=80.0,
             record_biphasic_pm_early_guardrail_beat_order_check=False,
             record_biphasic_pm_early_guardrail_min_prominence_frac=0.0,
-            version="v3.2.1-human-unified-biphasic-pm-guardrail",
+            version="human-unified-biphasic-pm-guardrail",
         )
 
     @classmethod
-    def for_human_unified_v321_post_apex_dz_preference(cls) -> "ProcessCycleConfig":
-        """
-        v3.2.1 ablation: sel16420-style post_apex_dz vs positive_peak STPQ compare.
-        """
+    def for_human_unified_post_apex_dz_preference(cls) -> "ProcessCycleConfig":
+        """Ablation: post_apex_dz vs positive_peak STPQ compare."""
         return replace(
-            cls._for_human_unified_v321_base(),
+            cls._for_human_unified_base(),
             record_stpq_post_apex_dz_preference=True,
-            version="v3.2.1-human-unified-post-apex-dz-preference",
+            version="human-unified-post-apex-dz-preference",
         )
 
     @classmethod
-    def for_human_unified_v321_biphasic_pm_early_guardrail_uplift120(cls) -> "ProcessCycleConfig":
-        """
-        Guardrail ablation: 120 ms max uplift + beat-level pos-before-neg and prominence checks.
-        """
+    def for_human_unified_biphasic_pm_early_guardrail_uplift120(cls) -> "ProcessCycleConfig":
+        """Guardrail ablation: 120 ms max uplift + beat-level pos-before-neg checks."""
         return replace(
-            cls.for_human_unified_v321_biphasic_pm_early_guardrail(),
+            cls.for_human_unified_biphasic_pm_early_guardrail(),
             record_biphasic_pm_early_guardrail_max_uplift_ms=120.0,
             record_biphasic_pm_early_guardrail_beat_order_check=True,
             record_biphasic_pm_early_guardrail_min_prominence_frac=0.12,
-            version="v3.2.1-human-unified-biphasic-pm-guardrail-u120",
+            version="human-unified-biphasic-pm-guardrail-u120",
         )
+
+    @classmethod
+    def for_human_unified_v321_biphasic_positive_negative_lobe_search(cls) -> "ProcessCycleConfig":
+        """Deprecated alias for :meth:`for_human_unified_biphasic_positive_negative_lobe_search`."""
+        return cls.for_human_unified_biphasic_positive_negative_lobe_search()
+
+    @classmethod
+    def for_human_unified_v321_biphasic_pm_early_guardrail(cls) -> "ProcessCycleConfig":
+        """Deprecated alias for :meth:`for_human_unified_biphasic_pm_early_guardrail`."""
+        return cls.for_human_unified_biphasic_pm_early_guardrail()
+
+    @classmethod
+    def for_human_unified_v321_post_apex_dz_preference(cls) -> "ProcessCycleConfig":
+        """Deprecated alias for :meth:`for_human_unified_post_apex_dz_preference`."""
+        return cls.for_human_unified_post_apex_dz_preference()
+
+    @classmethod
+    def for_human_unified_v321_biphasic_pm_early_guardrail_uplift120(cls) -> "ProcessCycleConfig":
+        """Deprecated alias for :meth:`for_human_unified_biphasic_pm_early_guardrail_uplift120`."""
+        return cls.for_human_unified_biphasic_pm_early_guardrail_uplift120()
 
     @classmethod
     def for_human_unified_v33a(cls) -> "ProcessCycleConfig":
         """
-        Archived experimental v3.3a sprint: v3.2.1 + fill-missing T only (no clinical verify).
-
-        Not the production default. See ``benchmark_results/archive/v33a_sprint_20260526/``.
+        Archived experimental fill-missing-T variant (not the production default).
         """
         return replace(
-            cls._for_human_unified_v321_base(),
+            cls._for_human_unified_base(),
             record_delineation_fill_missing_t=True,
             record_delineation_template_fallback=True,
             record_clinical_verify=False,
             record_delineation_map_all_beats=False,
             t_wave_use_record_prior=True,
             record_stpq_t_per_cycle_guardrail_ms=20.0,
-            version="v3.3a-v321-human-unified-fill-only",
+            version="human-unified-fill-only",
         )
 
     @classmethod

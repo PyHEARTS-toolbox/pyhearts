@@ -58,7 +58,7 @@ def _synthetic_biphasic_beat(fs: float = 250.0) -> tuple:
 class TestTCandidateScoring:
     def test_generates_multiple_sources(self):
         ecg, r_idx, s_i, q_next, tmpl, ctx = _synthetic_biphasic_beat()
-        cfg = ProcessCycleConfig.for_human_unified_v321()
+        cfg = ProcessCycleConfig.for_human_unified()
         cands, _ = generate_t_candidates(
             ecg, r_idx, s_i, q_next, 250.0, tmpl=tmpl, cfg=cfg, ctx=ctx
         )

@@ -43,7 +43,7 @@ def _mock_biphasic_tmpl(n_tpl: int = 200, pos_frac: float = 0.40) -> MedianBeatT
 class TestGuardrailPreset:
     def test_classify_without_lobe_override(self):
         sig, r_peaks = _synthetic_biphasic_pm_record()
-        cfg = ProcessCycleConfig.for_human_unified_v321_biphasic_pm_early_guardrail()
+        cfg = ProcessCycleConfig.for_human_unified_biphasic_pm_early_guardrail()
         tmpl = build_stpq_beat_template(sig, r_peaks, 250.0, cfg)
         assert tmpl.t_morphology == MORPH_BIPHASIC_POS_NEG
         assert tmpl.t_biphasic_pos_landmark_idx is not None
@@ -73,7 +73,7 @@ class TestGuardrailPreset:
         )
 
         tmpl = _mock_biphasic_tmpl()
-        cfg = ProcessCycleConfig.for_human_unified_v321_biphasic_pm_early_guardrail()
+        cfg = ProcessCycleConfig.for_human_unified_biphasic_pm_early_guardrail()
         ecg = np.zeros(600)
         ecg[first_pos] = 0.6
         too_early = float(first_pos) - margin_samp - 5

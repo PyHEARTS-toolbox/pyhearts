@@ -55,9 +55,9 @@ def _plateau_wave(n: int = 120) -> np.ndarray:
 class TestPostApexDzPreference:
     def test_classify_requires_experiment_flag(self):
         tmpl = _mock_post_apex_tmpl()
-        cfg_off = ProcessCycleConfig.for_human_unified_v321()
+        cfg_off = ProcessCycleConfig.for_human_unified()
         cfg_on = replace(
-            ProcessCycleConfig.for_human_unified_v321_post_apex_dz_preference(),
+            ProcessCycleConfig.for_human_unified_post_apex_dz_preference(),
             record_stpq_post_apex_dz_max_beat_frac=None,
         )
         segments = [_plateau_wave()]
@@ -81,7 +81,7 @@ class TestPostApexDzPreference:
         wave = _plateau_wave(120)
         pos_abs = 50
         dz_abs = 62
-        cfg = ProcessCycleConfig.for_human_unified_v321_post_apex_dz_preference()
+        cfg = ProcessCycleConfig.for_human_unified_post_apex_dz_preference()
         baseline = 0.0
         assert qualified_post_apex_dz_pair(
             wave, lo, pos_abs, dz_abs, baseline, 250.0, cfg
@@ -89,7 +89,7 @@ class TestPostApexDzPreference:
 
     def test_probe_fraction_on_plateau_segment(self):
         cfg = replace(
-            ProcessCycleConfig.for_human_unified_v321_post_apex_dz_preference(),
+            ProcessCycleConfig.for_human_unified_post_apex_dz_preference(),
             record_stpq_use_savgol=False,
         )
         frac = probe_post_apex_dz_segment_fraction([_plateau_wave()], 250.0, cfg)
@@ -103,7 +103,7 @@ class TestPostApexDzPreference:
         apex_abs = lo + 50
         tmpl = _mock_post_apex_tmpl()
         cfg = replace(
-            ProcessCycleConfig.for_human_unified_v321_post_apex_dz_preference(),
+            ProcessCycleConfig.for_human_unified_post_apex_dz_preference(),
             record_stpq_use_savgol=False,
             record_stpq_post_apex_dz_pos_early_ms=0.0,
         )
@@ -129,7 +129,7 @@ class TestPostApexDzPreference:
         ecg[200:280] = np.linspace(0, 0.5, 80)
         ecg[280:320] = np.linspace(0.48, 0.1, 40)
         tmpl = _mock_post_apex_tmpl()
-        cfg = ProcessCycleConfig.for_human_unified_v321_post_apex_dz_preference()
+        cfg = ProcessCycleConfig.for_human_unified_post_apex_dz_preference()
         idx, _ = record_detect_t_peak(
             ecg, s_i, q_next, tmpl, fs, cfg, r_idx=r_idx
         )

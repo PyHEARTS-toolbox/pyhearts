@@ -104,7 +104,7 @@ class TestStpqTemplate:
 
     def test_human_unified_production_preset(self):
         cfg = ProcessCycleConfig.for_human_unified()
-        assert cfg.version == "v3.2.1-human-unified"
+        assert cfg.version == "human-unified"
         assert cfg.record_delineation is True
         assert cfg.record_template_anchor == "s_to_q"
         assert cfg.p_t_threshold_mode == "template"

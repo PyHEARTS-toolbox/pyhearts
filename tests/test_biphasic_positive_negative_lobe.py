@@ -72,7 +72,7 @@ class TestBiphasicClassification:
 class TestBuildStpqTemplate:
     def test_build_stpq_sets_biphasic_landmarks(self):
         sig, r_peaks = _synthetic_biphasic_pm_record()
-        cfg = ProcessCycleConfig.for_human_unified_v321_biphasic_positive_negative_lobe_search()
+        cfg = ProcessCycleConfig.for_human_unified_biphasic_positive_negative_lobe_search()
         tmpl = build_stpq_beat_template(sig, r_peaks, 250.0, cfg)
         assert tmpl.valid
         assert tmpl.t_morphology == MORPH_BIPHASIC_POS_NEG
@@ -81,15 +81,15 @@ class TestBuildStpqTemplate:
         assert tmpl.t_biphasic_neg_landmark_idx is not None
         assert tmpl.t_landmark_idx == tmpl.t_biphasic_pos_landmark_idx
 
-    def test_v321_baseline_does_not_set_biphasic(self):
+    def test_baseline_does_not_set_biphasic(self):
         sig, r_peaks = _synthetic_biphasic_pm_record()
-        cfg = ProcessCycleConfig.for_human_unified_v321()
+        cfg = ProcessCycleConfig.for_human_unified()
         tmpl = build_stpq_beat_template(sig, r_peaks, 250.0, cfg)
         assert tmpl.t_morphology != MORPH_BIPHASIC_POS_NEG
 
     def test_delineate_preserves_biphasic_landmarks(self):
         sig, r_peaks = _synthetic_biphasic_pm_record()
-        cfg = ProcessCycleConfig.for_human_unified_v321_biphasic_positive_negative_lobe_search()
+        cfg = ProcessCycleConfig.for_human_unified_biphasic_positive_negative_lobe_search()
         raw = build_stpq_beat_template(sig, r_peaks, 250.0, cfg)
         tmpl = delineate_record_template(raw, 250.0, cfg)
         assert tmpl.t_morphology == MORPH_BIPHASIC_POS_NEG
@@ -127,7 +127,7 @@ class TestPositiveLobeSearch:
         # Positive lobe ~200-260, negative ~320-380
         ecg[200:260] += 0.4
         ecg[320:380] -= 0.5
-        cfg = ProcessCycleConfig.for_human_unified_v321_biphasic_positive_negative_lobe_search()
+        cfg = ProcessCycleConfig.for_human_unified_biphasic_positive_negative_lobe_search()
         tmpl = self._mock_tmpl(pos_frac=0.40, neg_frac=0.75)
         idx, pol = _search_t_biphasic_positive_lobe(ecg, s_i, q_next, tmpl, fs, cfg)
         assert idx is not None
@@ -142,7 +142,7 @@ class TestPositiveLobeSearch:
         s_i, q_next = 100, 350
         ecg[210:250] += 0.5
         ecg[330:370] -= 0.6
-        cfg = ProcessCycleConfig.for_human_unified_v321_biphasic_positive_negative_lobe_search()
+        cfg = ProcessCycleConfig.for_human_unified_biphasic_positive_negative_lobe_search()
         assert cfg.record_biphasic_pm_lobe_search
         tmpl = self._mock_tmpl(pos_frac=0.38, neg_frac=0.72)
         idx, pol = record_detect_t_peak(

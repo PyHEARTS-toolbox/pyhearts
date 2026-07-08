@@ -4,10 +4,10 @@
 
 | Species | How to run | Config |
 |---------|------------|--------|
-| Human | `PyHEARTS(sampling_rate=fs, species="human")` | `ProcessCycleConfig.for_human_unified()` (v3.2.1) |
+| Human | `PyHEARTS(sampling_rate=fs, species="human")` | `ProcessCycleConfig.for_human_unified()` |
 | Mouse | `PyHEARTS(sampling_rate=fs, species="mouse")` | `ProcessCycleConfig.for_mouse()` |
 
-`for_human_unified()` (v3.2.1): derivative R + per-cycle P + record STPQ T on median-baseline
+`for_human_unified()`: derivative R + per-cycle P + record STPQ T on median-baseline
 trace (no Savitzky–Golay). Threshold T apex, w1 floor (40% S→Q), morphology window,
 signed-polarity apex filter, template-guided reconcile. Record T overwrites finite
 per-cycle T; P is retained from per-cycle detection.
@@ -27,10 +27,9 @@ features_df, cycles_df = analyzer.analyze_ecg(ecg_mv)
 
 | Method | Role |
 |--------|------|
-| `for_human()` | v2.3 baseline (per-cycle P/T only; not the `species="human"` default) |
-| `for_human_unified_v321()` | Explicit alias for production v3.2.1 |
+| `for_human()` | Earlier human baseline (per-cycle P/T only; not the `species="human"` default) |
 | `for_human_unified_template_prior_phase1()` | Template-prior windows experiment (skips record STPQ overwrite) |
-| `for_human_unified_v33a()` | Archived fill-missing-T sprint variant |
+| `for_human_unified_v33a()` | Archived fill-missing-T variant |
 
 R detection is **derivative + Phase A** only (`r_detection_method="derivative"`).
 

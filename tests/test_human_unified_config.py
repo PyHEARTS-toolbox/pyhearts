@@ -1,4 +1,4 @@
-"""Tests for human_unified production preset + v3.2.1 alias."""
+"""Tests for human_unified production preset."""
 
 import pytest
 
@@ -6,7 +6,7 @@ from pyhearts.config import ProcessCycleConfig
 from pyhearts.processing.pt_detection_mode import p_t_detection_is_record_only
 
 
-def test_human_unified_v321_production_defaults():
+def test_human_unified_production_defaults():
     cfg = ProcessCycleConfig.for_human_unified()
     assert cfg.r_detection_method == "derivative"
     assert cfg.record_delineation is True
@@ -23,7 +23,7 @@ def test_human_unified_v321_production_defaults():
     assert cfg.record_delineation_fill_missing_t is False
     assert cfg.record_delineation_template_fallback is True
     assert cfg.record_delineation_refresh_shape is True
-    assert cfg.version == "v3.2.1-human-unified"
+    assert cfg.version == "human-unified"
     assert cfg.record_stpq_t_w1_end_mode == "template_tj_margin"
     assert cfg.record_stpq_t_apex_mode == "threshold"
     assert cfg.record_stpq_t_project_from == "delineated"
@@ -39,7 +39,7 @@ def test_human_unified_v321_production_defaults():
 
 
 def test_human_unified_v321_alias_matches_production():
-    assert ProcessCycleConfig.for_human_unified_v321().version == "v3.2.1-human-unified"
+    assert ProcessCycleConfig.for_human_unified_v321().version == "human-unified"
     assert (
         ProcessCycleConfig.for_human_unified_v321().version
         == ProcessCycleConfig.for_human_unified().version
@@ -48,7 +48,7 @@ def test_human_unified_v321_alias_matches_production():
 
 def test_human_unified_v33a_archived_fill_only():
     cfg = ProcessCycleConfig.for_human_unified_v33a()
-    assert cfg.version == "v3.3a-v321-human-unified-fill-only"
+    assert cfg.version == "human-unified-fill-only"
     assert cfg.record_delineation_fill_missing_t is True
     assert cfg.record_delineation_template_fallback is True
     assert cfg.t_wave_use_record_prior is True

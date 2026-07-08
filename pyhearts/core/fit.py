@@ -93,7 +93,7 @@ class PyHEARTS:
     
     species : {"human", "mouse"}, optional
         ``"human"`` → :meth:`~pyhearts.config.ProcessCycleConfig.for_human_unified`
-        (v3.2.1 production). ``"mouse"`` → :meth:`~pyhearts.config.ProcessCycleConfig.for_mouse`.
+        (production). ``"mouse"`` → :meth:`~pyhearts.config.ProcessCycleConfig.for_mouse`.
         Pass ``cfg=`` explicitly to override (e.g. ``ProcessCycleConfig.for_mouse()``).
 
     Based on QTDB benchmark (Dec 2024):
