@@ -113,6 +113,11 @@ cython_debug/
 data/
 raw_data/
 results/
+benchmark_results/
+
+# Archived July 2026 ensemble investigation and related non-mainline notes
+documentation/
+reviewer_response_updated.md
 
 # Non-toolbox research/analysis folders (keep locally, don't ship in the toolbox repo)
 advancement/
@@ -293,4 +298,6 @@ pyhearts/processing/qrs_boundary_detection.py
 # Verification/utility scripts
 verify_*.py
 
-documentation/
+# Local-only legacy presets and analysis scripts (not shipped in the toolbox)
+pyhearts/legacy/
+scripts/

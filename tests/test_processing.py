@@ -544,3 +544,103 @@ class TestInitializeOutputDict:
         for key in pairwise:
             assert key in result
 
+
+class TestRPeakAnchoring:
+    """Tests for global R anchoring helpers (step-1 fiducial fix)."""
+
+    def test_global_index_to_cycle_relative_exact(self):
+        from pyhearts.processing.peaks import global_index_to_cycle_relative
+
+        xs = np.array([100, 101, 102, 103, 104])
+        assert global_index_to_cycle_relative(102, xs) == 2
+
+    def test_global_index_to_cycle_relative_nearest(self):
+        from pyhearts.processing.peaks import global_index_to_cycle_relative
+
+        xs = np.array([100, 102, 104])
+        assert global_index_to_cycle_relative(101, xs) == 0
+
+    def test_refine_r_peak_near_anchor_finds_local_maximum(self, sampling_rate):
+        from pyhearts.processing.peaks import refine_r_peak_near_anchor
+
+        n = 50
+        signal = np.zeros(n)
+        true_r = 25
+        signal[true_r] = 2.0
+        signal[true_r - 1] = 1.0
+        signal[true_r + 1] = 1.0
+        refined = refine_r_peak_near_anchor(
+            signal, anchor_idx=true_r - 2, sampling_rate=sampling_rate, half_window_ms=80.0
+        )
+        assert abs(refined - true_r) <= 2
+
+    def test_anchored_r_prefers_global_over_argmax_decoy(self, sampling_rate):
+        """Anchoring must not follow a larger artifact away from the global R index."""
+        from pyhearts.processing.peaks import (
+            global_index_to_cycle_relative,
+            refine_r_peak_near_anchor,
+        )
+
+        n = 200
+        r_global = 100
+        signal = np.zeros(n)
+        signal[r_global] = 1.5
+        signal[r_global - 1] = 0.5
+        signal[r_global + 1] = 0.5
+        decoy_global = 60  # inside the epoch window, larger |amp| than R
+        signal[decoy_global] = 2.0
+
+        pre_r = 50
+        start = r_global - pre_r
+        xs = np.arange(start, start + 2 * pre_r)
+        cycle_signal = signal[start : start + 2 * pre_r]
+
+        argmax_rel = int(np.argmax(np.abs(cycle_signal)))
+        r_rel = global_index_to_cycle_relative(r_global, xs)
+        anchored_rel = refine_r_peak_near_anchor(
+            cycle_signal, r_rel, sampling_rate, half_window_ms=20.0
+        )
+
+        assert abs(xs[argmax_rel] - decoy_global) <= 1
+        assert abs(xs[anchored_rel] - r_global) <= 2
+        assert argmax_rel != anchored_rel
+
+
+class TestSubsamplePeakRefinement:
+    def test_cycle_rel_to_global_interpolates_fraction(self):
+        from pyhearts.processing.peaks import cycle_rel_to_global_sample
+
+        xs = np.array([100.0, 110.0, 120.0, 130.0])
+        signal = np.array([0.0, 1.0, 3.0, 1.0])
+        g = cycle_rel_to_global_sample(1.5, xs, signal, refine_subsample=False)
+        assert g == pytest.approx(115.0)
+
+    def test_refine_peak_index_subsample_returns_fraction(self):
+        from pyhearts.processing.peaks import refine_peak_index_subsample
+
+        signal = np.array([0.0, 1.0, 3.0, 1.0, 0.0])
+        rel = refine_peak_index_subsample(signal, 2, enabled=True)
+        assert 1.5 < rel < 2.5
+
+    def test_find_peaks_refine_subsample_snaps_to_nearest_sample(self, sampling_rate):
+        from pyhearts.processing.peaks import find_peaks
+
+        n = 50
+        xs = np.arange(n, dtype=float)
+        signal = np.zeros(n)
+        signal[20] = 2.0
+        signal[19] = 1.0
+        signal[21] = 1.0
+        idx, amp, _ = find_peaks(
+            signal,
+            xs,
+            0,
+            n,
+            mode="max",
+            verbose=False,
+            refine_subsample=True,
+        )
+        assert idx is not None
+        assert isinstance(idx, int)
+        assert idx in (19, 20, 21)
+

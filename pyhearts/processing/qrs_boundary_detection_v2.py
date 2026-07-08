@@ -8,12 +8,124 @@ import numpy as np
 from typing import Optional
 
 
+def _ms_to_samples(ms: float, sampling_rate: float) -> int:
+    return int(round(ms * sampling_rate / 1000.0))
+
+
+def _fallback_qrs_onset(
+    r_peak_idx: int,
+    sampling_rate: float,
+    fallback_offset_ms: float,
+) -> int:
+    return max(0, r_peak_idx - _ms_to_samples(fallback_offset_ms, sampling_rate))
+
+
+def _clamp_qrs_onset_before_r(
+    qrs_onset_idx: int,
+    r_peak_idx: int,
+    sampling_rate: float,
+    *,
+    min_before_r_ms: float,
+    max_before_r_ms: float,
+    fallback_offset_ms: float,
+) -> int:
+    """Keep onset before R and within physiologic distance limits."""
+    min_dist = _ms_to_samples(min_before_r_ms, sampling_rate)
+    max_dist = _ms_to_samples(max_before_r_ms, sampling_rate)
+    if qrs_onset_idx >= r_peak_idx:
+        return _fallback_qrs_onset(r_peak_idx, sampling_rate, fallback_offset_ms)
+    dist = r_peak_idx - qrs_onset_idx
+    if dist < min_dist:
+        return max(0, r_peak_idx - min_dist)
+    if dist > max_dist:
+        return max(0, r_peak_idx - max_dist)
+    return qrs_onset_idx
+
+
+def resolve_qrs_onset_idx(
+    signal: np.ndarray,
+    r_peak_idx: int,
+    sampling_rate: float,
+    *,
+    q_peak_idx: Optional[int] = None,
+    search_window_ms: float = 120.0,
+    fallback_offset_ms: float = 80.0,
+    min_before_r_ms: float = 30.0,
+    max_before_r_ms: float = 200.0,
+    verbose: bool = False,
+    cycle_idx: Optional[int] = None,
+) -> int:
+    """
+    Detect QRS onset with validation and a single configurable fallback.
+
+    When ``q_peak_idx`` is set, also tries R-anchored search and keeps the
+    earlier valid onset to widen the P-wave search window.
+    """
+    r_peak_idx = int(round(float(r_peak_idx)))
+    if r_peak_idx < 0 or r_peak_idx >= len(signal):
+        return _fallback_qrs_onset(max(0, r_peak_idx), sampling_rate, fallback_offset_ms)
+
+    candidates = []
+    if q_peak_idx is not None:
+        q_int = int(round(float(q_peak_idx)))
+        if 0 <= q_int < r_peak_idx:
+            candidates.append(
+                detect_qrs_onset_derivative(
+                    signal=signal,
+                    q_peak_idx=q_int,
+                    r_peak_idx=r_peak_idx,
+                    sampling_rate=sampling_rate,
+                    search_window_ms=search_window_ms,
+                    fallback_offset_ms=fallback_offset_ms,
+                    verbose=verbose,
+                    cycle_idx=cycle_idx,
+                )
+            )
+    candidates.append(
+        detect_qrs_onset_derivative(
+            signal=signal,
+            q_peak_idx=None,
+            r_peak_idx=r_peak_idx,
+            sampling_rate=sampling_rate,
+            search_window_ms=search_window_ms,
+            fallback_offset_ms=fallback_offset_ms,
+            verbose=verbose,
+            cycle_idx=cycle_idx,
+        )
+    )
+
+    valid = [
+        _clamp_qrs_onset_before_r(
+            c,
+            r_peak_idx,
+            sampling_rate,
+            min_before_r_ms=min_before_r_ms,
+            max_before_r_ms=max_before_r_ms,
+            fallback_offset_ms=fallback_offset_ms,
+        )
+        for c in candidates
+        if c is not None and 0 <= c < r_peak_idx
+    ]
+    if valid:
+        onset = int(min(valid))
+    else:
+        onset = _fallback_qrs_onset(r_peak_idx, sampling_rate, fallback_offset_ms)
+
+    if verbose and cycle_idx is not None:
+        print(
+            f"[Cycle {cycle_idx}]: resolve_qrs_onset -> {onset} "
+            f"(R={r_peak_idx}, {(r_peak_idx - onset) * 1000.0 / sampling_rate:.1f} ms before R)"
+        )
+    return onset
+
+
 def detect_qrs_onset_derivative(
     signal: np.ndarray,
     q_peak_idx: Optional[int],
     r_peak_idx: int,
     sampling_rate: float,
     search_window_ms: float = 100.0,
+    fallback_offset_ms: float = 80.0,
     verbose: bool = False,
     cycle_idx: Optional[int] = None,
 ) -> int:
@@ -22,8 +134,12 @@ def detect_qrs_onset_derivative(
     
     Uses a simpler approach: find where signal starts deflecting from baseline.
     """
+    r_peak_idx = int(round(float(r_peak_idx)))
+    if q_peak_idx is not None:
+        q_peak_idx = int(round(float(q_peak_idx)))
+
     if r_peak_idx < 0 or r_peak_idx >= len(signal):
-        return max(0, r_peak_idx - int(round(40 * sampling_rate / 1000.0)))
+        return _fallback_qrs_onset(r_peak_idx, sampling_rate, fallback_offset_ms)
     
     # Determine search start point
     if q_peak_idx is not None and 0 <= q_peak_idx < r_peak_idx:
@@ -37,11 +153,11 @@ def detect_qrs_onset_derivative(
     search_begin = max(0, search_start - search_window_samples)
     
     if search_begin >= search_start or search_start - search_begin < 3:
-        return max(0, search_start - int(round(40 * sampling_rate / 1000.0)))
+        return _fallback_qrs_onset(r_peak_idx, sampling_rate, fallback_offset_ms)
     
     search_segment = signal[search_begin:search_start]
     if len(search_segment) < 3:
-        return max(0, search_start - int(round(40 * sampling_rate / 1000.0)))
+        return _fallback_qrs_onset(r_peak_idx, sampling_rate, fallback_offset_ms)
     
     # Estimate baseline from early part of segment
     baseline_window = max(5, min(20, len(search_segment)//3))
@@ -54,7 +170,7 @@ def detect_qrs_onset_derivative(
     # Compute derivative
     derivative = np.diff(search_segment)
     if len(derivative) < 2:
-        return max(0, search_start - int(round(40 * sampling_rate / 1000.0)))
+        return _fallback_qrs_onset(r_peak_idx, sampling_rate, fallback_offset_ms)
     
     # Find QRS onset: point where signal starts deflecting from baseline
     # Look for point where:
@@ -74,7 +190,8 @@ def detect_qrs_onset_derivative(
     # Threshold: 8% of max QRS derivative (same as end detection for consistency)
     deriv_threshold = max_qrs_derivative * 0.08
     
-    qrs_onset_idx = search_start  # Default
+    qrs_onset_idx = search_start  # Default until a candidate is found
+    found_baseline_onset = False
     
     # Search backwards for onset point
     for i in range(len(search_segment) - 2, max(0, len(search_segment)//4), -1):
@@ -95,6 +212,7 @@ def detect_qrs_onset_derivative(
             if signal_at_baseline and deriv_small:
                 # Found candidate - this is likely QRS onset
                 qrs_onset_idx = search_begin + i
+                found_baseline_onset = True
                 # Continue searching backwards to find earliest valid point (but limit search)
                 max_backward_search = int(round(15 * sampling_rate / 1000.0))  # 15ms max
                 for j in range(i - 1, max(0, i - max_backward_search), -1):
@@ -104,10 +222,23 @@ def detect_qrs_onset_derivative(
                         else:
                             break
                 break
+
+    # Max-slope fallback: steepest upslope before Q/R, then walk back to low derivative
+    if not found_baseline_onset or qrs_onset_idx >= search_start:
+        d_abs = np.abs(derivative)
+        if len(d_abs) > 0:
+            peak_d_rel = int(np.argmax(d_abs))
+            onset_rel = peak_d_rel
+            back_limit = max(0, peak_d_rel - _ms_to_samples(50.0, sampling_rate))
+            for j in range(peak_d_rel, back_limit - 1, -1):
+                if d_abs[j] < deriv_threshold:
+                    onset_rel = j
+                    break
+            qrs_onset_idx = search_begin + onset_rel
     
     # Ensure onset is before R peak
     if qrs_onset_idx >= r_peak_idx:
-        qrs_onset_idx = max(0, r_peak_idx - int(round(40 * sampling_rate / 1000.0)))
+        qrs_onset_idx = _fallback_qrs_onset(r_peak_idx, sampling_rate, fallback_offset_ms)
     
     # Ensure not too far before R (max 150ms)
     max_distance_samples = int(round(150 * sampling_rate / 1000.0))
@@ -117,7 +248,16 @@ def detect_qrs_onset_derivative(
     if verbose and cycle_idx is not None:
         print(f"[Cycle {cycle_idx}]: QRS onset detected at {qrs_onset_idx} (Q={q_peak_idx}, R={r_peak_idx}, distance={r_peak_idx - qrs_onset_idx} samples)")
     
-    return int(qrs_onset_idx)
+    return int(
+        _clamp_qrs_onset_before_r(
+            qrs_onset_idx,
+            r_peak_idx,
+            sampling_rate,
+            min_before_r_ms=30.0,
+            max_before_r_ms=200.0,
+            fallback_offset_ms=fallback_offset_ms,
+        )
+    )
 
 
 def detect_qrs_end_derivative(

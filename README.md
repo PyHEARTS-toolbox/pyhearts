@@ -35,6 +35,8 @@ analyzer = pyhearts.PyHEARTS(sampling_rate=loaded.sampling_rate_hz, species="hum
 features_df, cycles_df = analyzer.analyze_ecg(loaded.ecg)
 ```
 
+`species="human"` uses the **v3.2.1 production preset** (`ProcessCycleConfig.for_human_unified()`): derivative R + per-cycle P + record STPQ T (threshold apex, w1 floor, morphology window). See [docs/PRESETS.md](docs/PRESETS.md).
+
 ## Flow chart (what PyHEARTS does)
 
 Beginner-friendly visual summary:
@@ -60,7 +62,7 @@ Tutorials live in a separate repository: [PyHEARTS-toolbox/tutorials](https://gi
   - Interval (PR, QRS, QT, ST, RR, PP)
   - Variability (standard deviation, coefficient of variation, interquartile range)
   - Heart rate variability (SDNN, RMSSD, NN50)
-- **Cross-species compatibility**: Presets for human and mouse ECGs (`for_human()` and `for_mouse()`).
+- **Cross-species compatibility**: Human production preset **`for_human_unified()`** (v3.2.1, default via `species="human"`). Mouse: `for_mouse()`. Preset guide: [docs/PRESETS.md](docs/PRESETS.md).
 - **Reconstruction fidelity**: Over 75% of cycles exceed R² > 0.9.
 - **High reproducibility**: Median feature ICC > 0.95 across sessions and datasets.
 - **Transparent and configurable**: Every run saves full parameter configuration and analysis metadata.

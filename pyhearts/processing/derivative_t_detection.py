@@ -12,6 +12,64 @@ from typing import Optional, Tuple
 from scipy.signal import butter, filtfilt, savgol_filter
 
 
+def compute_t_search_window(
+    r_center_idx: int,
+    cycle_len_samples: int,
+    sampling_rate: float,
+    *,
+    qrs_end_idx: Optional[int] = None,
+    s_center_idx: Optional[int] = None,
+    start_offset_ms: float = 100.0,
+    qrs_end_margin_ms: float = 20.0,
+    rr_frac: float = 0.55,
+    max_offset_ms: float = 600.0,
+    end_margin_ms: float = 40.0,
+    min_window_ms: float = 100.0,
+) -> Tuple[int, int]:
+    """
+    Compute RR-adaptive sample indices for the T-wave search window.
+
+    The window starts after the QRS (R + offset or QRS end + margin) and ends at
+    the earlier of: a fraction of the cycle RR, a fixed maximum after R, or the
+    cycle boundary minus a small margin.
+    """
+    n = int(cycle_len_samples)
+    if n < 3:
+        return 0, max(0, n - 1)
+
+    r_center_idx = int(np.clip(r_center_idx, 0, n - 1))
+    fs = float(sampling_rate)
+
+    def _ms_to_samples(ms: float) -> int:
+        return int(round(ms * fs / 1000.0))
+
+    start_from_r = r_center_idx + _ms_to_samples(start_offset_ms)
+    start_candidates = [start_from_r]
+    kdis = _ms_to_samples(qrs_end_margin_ms)
+    if qrs_end_idx is not None:
+        start_candidates.append(int(qrs_end_idx) + kdis)
+    elif s_center_idx is not None:
+        start_candidates.append(int(s_center_idx) + kdis)
+    t_start = max(0, min(max(start_candidates), n - 2))
+
+    rr_samples = max(n - 1, 1)
+    end_margin = _ms_to_samples(end_margin_ms)
+    end_from_rr = r_center_idx + int(round(rr_frac * rr_samples))
+    end_from_max = r_center_idx + _ms_to_samples(max_offset_ms)
+    end_from_cycle = (n - 1) - end_margin
+
+    t_end = min(n - 1, end_from_rr, end_from_max, end_from_cycle)
+
+    min_win = _ms_to_samples(min_window_ms)
+    if t_end - t_start < min_win:
+        t_end = min(n - 1, t_start + min_win)
+
+    if t_end <= t_start:
+        t_end = min(n - 1, t_start + max(2, min_win))
+
+    return t_start, t_end
+
+
 def compute_filtered_derivative(
     signal: np.ndarray,
     sampling_rate: float,
@@ -229,6 +287,37 @@ def find_t_wave_boundary(
     return None
 
 
+def refine_t_peak_on_signal(
+    signal: np.ndarray,
+    peak_idx: int,
+    morphology: int,
+    sampling_rate: float,
+    *,
+    half_window_ms: float = 40.0,
+) -> Tuple[int, float]:
+    """
+    Refine T apex on the original (non-QRS-removed) signal near a coarse index.
+
+    Local argmax/argmin within ±half_window_ms improves timing vs. sigmoid-bridged signal.
+    """
+    peak_idx = int(round(float(peak_idx)))
+    if len(signal) == 0:
+        return 0, 0.0
+    peak_idx = int(np.clip(peak_idx, 0, len(signal) - 1))
+    half = int(round(half_window_ms * sampling_rate / 1000.0))
+    lo = max(0, peak_idx - half)
+    hi = min(len(signal), peak_idx + half + 1)
+    if hi - lo < 2:
+        return peak_idx, float(signal[peak_idx])
+    segment = signal[lo:hi]
+    if morphology == 0:
+        rel = int(np.argmax(segment))
+    else:
+        rel = int(np.argmin(segment))
+    refined = lo + rel
+    return refined, float(signal[refined])
+
+
 def detect_t_wave_derivative_based(
     signal: np.ndarray,
     derivative: np.ndarray,
@@ -239,7 +328,9 @@ def detect_t_wave_derivative_based(
     verbose: bool = False,
     r_peak_idx: Optional[int] = None,
     r_peak_value: Optional[float] = None,
-) -> Tuple[Optional[int], Optional[int], Optional[int], Optional[int], Optional[float]]:
+    region_expansion_ms: float = 80.0,
+    region_min_fraction: float = 0.0,
+) -> Tuple[Optional[int], Optional[int], Optional[int], Optional[float], Optional[int]]:
     """
     Detect T wave using derivative-based method.
     
@@ -437,18 +528,17 @@ def detect_t_wave_derivative_based(
     # The T wave can extend well beyond the derivative min/max region
     # Use a generous expansion, but also ensure we cover most of the search window
     # to catch late T peaks
-    expansion_samples = int(round(200.0 * sampling_rate / 1000.0))  # Increased to 200ms
+    expansion_samples = int(round(region_expansion_ms * sampling_rate / 1000.0))
     t_region_start = max(search_start, t_region_start - expansion_samples)
     t_region_end = min(search_end - 1, t_region_end + expansion_samples)
-    
-    # Also ensure we cover at least 80% of the search window to catch late T peaks
-    search_window_size = search_end - search_start
-    min_region_size = int(round(0.8 * search_window_size))
-    if (t_region_end - t_region_start) < min_region_size:
-        # Expand to cover more of the search window
-        center = (t_region_start + t_region_end) // 2
-        t_region_start = max(search_start, center - min_region_size // 2)
-        t_region_end = min(search_end - 1, center + min_region_size // 2)
+
+    if region_min_fraction > 0.0:
+        search_window_size = search_end - search_start
+        min_region_size = int(round(region_min_fraction * search_window_size))
+        if (t_region_end - t_region_start) < min_region_size:
+            center = (t_region_start + t_region_end) // 2
+            t_region_start = max(search_start, center - min_region_size // 2)
+            t_region_end = min(search_end - 1, center + min_region_size // 2)
     
     # Ensure region is valid and has minimum size
     if t_region_end <= t_region_start or (t_region_end - t_region_start) < 10:

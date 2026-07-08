@@ -143,9 +143,9 @@ def default_config():
 
 @pytest.fixture
 def human_config():
-    """Human preset ProcessCycleConfig for testing."""
+    """Production human preset (v3 unified) for testing."""
     from pyhearts.config import ProcessCycleConfig
-    return ProcessCycleConfig.for_human()
+    return ProcessCycleConfig.for_human_unified()
 
 
 @pytest.fixture

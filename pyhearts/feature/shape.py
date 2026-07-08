@@ -2,8 +2,13 @@ from typing import Optional, Tuple, Dict, List, Any
 from scipy.signal import savgol_filter
 import numpy as np
 
-from pyhearts.config import ProcessCycleConfig   
+from pyhearts.config import ProcessCycleConfig
 
+
+def _integrate_trapezoid(y: np.ndarray, *, dx: float) -> float:
+    """Trapezoidal integration compatible with NumPy 1.x (trapz) and 2.x (trapezoid)."""
+    integrate = getattr(np, "trapezoid", np.trapz)
+    return float(integrate(y, dx=dx))
 
 
 def compute_interdeflection_differences(
@@ -114,7 +119,7 @@ def compute_voltage_integrals(
             continue
 
         # Integrate in mV·s, then convert to µV·ms
-        area_mv_s = np.trapezoid(segment, dx=dt)
+        area_mv_s = _integrate_trapezoid(segment, dx=dt)
         result[key] = float(area_mv_s * 1e6)  # µV·ms
 
     return result

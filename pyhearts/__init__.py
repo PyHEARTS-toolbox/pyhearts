@@ -18,7 +18,12 @@ from . import plots
 from . import processing
 
 # I/O helpers
-from .io import load_monitor_csv
+from .io import (
+    load_monitor_csv,
+    load_wfdb_signal,
+    pick_lead_index,
+    pick_manual_annotation_ext,
+)
 
 # Signal generation (optional - requires neurokit2 which needs Python 3.10+)
 try:
@@ -36,6 +41,9 @@ __all__ = [
     "ProcessCycleConfig",
     # I/O
     "load_monitor_csv",
+    "load_wfdb_signal",
+    "pick_lead_index",
+    "pick_manual_annotation_ext",
     # Utilities (optional)
     "generate_ecg_signal",
     # Submodules

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Optional, Tuple
 import numpy as np
 
@@ -47,6 +49,9 @@ def find_peak_derivative_based(
     if polarity not in {"positive", "negative"}:
         raise ValueError("polarity must be 'positive' or 'negative'")
     
+    start_idx = nearest_sample_index(start_idx, len(signal))
+    end_idx = nearest_sample_index(end_idx, len(signal))
+
     # Validate search window
     if (
         start_idx >= end_idx
@@ -190,6 +195,72 @@ def refine_peak_parabolic(
     return peak_idx + offset
 
 
+def nearest_sample_index(rel_idx: float, n: int) -> int:
+    """Round a cycle-relative index to the nearest valid sample index."""
+    if n <= 0:
+        return 0
+    return int(np.clip(np.round(float(rel_idx)), 0, n - 1))
+
+
+def sample_at_fractional_index(signal: np.ndarray, rel_idx: float) -> float:
+    """Linear interpolation of *signal* at a fractional cycle-relative index."""
+    if signal.size == 0:
+        return np.nan
+    rel = float(np.clip(rel_idx, 0.0, float(signal.size - 1)))
+    i0 = int(np.floor(rel))
+    i1 = min(i0 + 1, signal.size - 1)
+    frac = rel - i0
+    return float(signal[i0] * (1.0 - frac) + signal[i1] * frac)
+
+
+def refine_peak_index_subsample(
+    signal: np.ndarray,
+    peak_idx: int | float,
+    *,
+    enabled: bool = True,
+) -> float:
+    """Return fractional cycle-relative peak index (parabolic refinement when enabled)."""
+    if peak_idx is None or (isinstance(peak_idx, float) and np.isnan(peak_idx)):
+        return np.nan
+    rel = float(peak_idx)
+    if not enabled or signal.size < 3:
+        return rel
+    anchor = int(np.clip(np.round(rel), 1, signal.size - 2))
+    return refine_peak_parabolic(signal, anchor)
+
+
+def cycle_rel_to_global_sample(
+    rel_idx: float,
+    xs_samples: np.ndarray,
+    signal: np.ndarray | None = None,
+    *,
+    refine_subsample: bool = False,
+) -> float:
+    """
+    Map a cycle-relative peak index to a global sample index.
+
+    When ``refine_subsample`` is True, applies parabolic refinement on *signal*
+    before linear interpolation across ``xs_samples``.
+    """
+    if rel_idx is None or (isinstance(rel_idx, float) and np.isnan(rel_idx)):
+        return np.nan
+    rel = refine_peak_index_subsample(
+        signal if signal is not None else np.zeros(1),
+        rel_idx,
+        enabled=refine_subsample and signal is not None and signal.size >= 3,
+    )
+    n = len(xs_samples)
+    if n == 0:
+        return np.nan
+    if n == 1:
+        return float(xs_samples[0])
+    rel = float(np.clip(rel, 0.0, float(n - 1)))
+    i0 = int(np.floor(rel))
+    i1 = min(i0 + 1, n - 1)
+    frac = rel - i0
+    return float(xs_samples[i0]) * (1.0 - frac) + float(xs_samples[i1]) * frac
+
+
 def find_peaks(
     signal: np.ndarray,
     xs: np.ndarray,
@@ -199,8 +270,9 @@ def find_peaks(
     verbose: bool = True,
     label: Optional[str] = None,
     cycle_idx: Optional[int] = None,
-    use_derivative: bool = False
-) -> Tuple[Optional[int], Optional[float], Optional[float]]:
+    use_derivative: bool = False,
+    refine_subsample: bool = False,
+) -> Tuple[Optional[float], Optional[float], Optional[float]]:
     """
     Find a local min or max peak in a segment of the signal.
 
@@ -225,8 +297,8 @@ def find_peaks(
 
     Returns
     -------
-    idx_absolute : int or None
-        Absolute index of the detected peak.
+    idx_absolute : float or None
+        Absolute index of the detected peak (fractional when ``refine_subsample``).
     amplitude : float or None
         Amplitude of the detected peak.
     center : float or None
@@ -238,6 +310,9 @@ def find_peaks(
     # Validate search window - handle None values
     if start_idx is None or end_idx is None:
         return None, None, None
+
+    start_idx = nearest_sample_index(start_idx, len(signal))
+    end_idx = nearest_sample_index(end_idx, len(signal))
     
     # Validate search window
     if (
@@ -257,11 +332,16 @@ def find_peaks(
             signal, start_idx, end_idx, polarity, verbose, label, cycle_idx
         )
         if idx_absolute is not None:
-            # Optionally refine with parabolic interpolation
-            refined_idx = refine_peak_parabolic(signal, idx_absolute)
-            idx_absolute = int(np.round(refined_idx))
-            amplitude = signal[idx_absolute]
-            center = xs[idx_absolute] if idx_absolute < len(xs) else xs[-1]
+            if refine_subsample:
+                idx_f = refine_peak_index_subsample(
+                    signal, idx_absolute, enabled=True
+                )
+                amplitude = sample_at_fractional_index(signal, idx_f)
+                idx_absolute = nearest_sample_index(idx_f, len(signal))
+            else:
+                idx_absolute = int(idx_absolute)
+                amplitude = signal[idx_absolute]
+            center = float(xs[idx_absolute]) if idx_absolute < len(xs) else float(xs[-1])
             return idx_absolute, amplitude, center
         else:
             return None, None, None
@@ -273,11 +353,78 @@ def find_peaks(
         else np.argmax(signal[start_idx:end_idx])
     )
     idx_absolute = start_idx + idx_relative
-    amplitude = signal[idx_absolute]
-    center = xs[idx_absolute]
+    if refine_subsample:
+        idx_f = refine_peak_index_subsample(signal, idx_absolute, enabled=True)
+        amplitude = sample_at_fractional_index(signal, idx_f)
+        idx_absolute = nearest_sample_index(idx_f, len(signal))
+    else:
+        idx_absolute = int(idx_absolute)
+        amplitude = signal[idx_absolute]
+    center = float(xs[idx_absolute])
 
     if verbose and label:
         print(f"[Cycle {cycle_idx}]: Found {label} peak at index {idx_absolute} with amplitude {amplitude:.6f}")
 
     return idx_absolute, amplitude, center
+
+
+def global_index_to_cycle_relative(global_idx: int, xs_samples: np.ndarray) -> int:
+    """Map a full-signal sample index to a cycle-relative index."""
+    matches = np.where(xs_samples == global_idx)[0]
+    if len(matches) > 0:
+        return int(matches[0])
+    return int(np.argmin(np.abs(xs_samples - global_idx)))
+
+
+def refine_r_peak_near_anchor(
+    signal: np.ndarray,
+    anchor_idx: int,
+    sampling_rate: float,
+    half_window_ms: float = 20.0,
+    refine_mode: str = "derivative",
+) -> int:
+    """
+    Refine an R-peak index near the anchor.
+
+    ``derivative``: derivative zero-crossing (legacy detector mapping).
+    ``extremum``: local max/min on the signal (TRP-style, ±window on raw/epoch).
+    """
+    n = len(signal)
+    if n < 3:
+        return int(np.clip(anchor_idx, 0, max(0, n - 1)))
+
+    anchor_idx = int(np.clip(anchor_idx, 0, n - 1))
+    half_w = max(1, int(round(half_window_ms * sampling_rate / 1000.0)))
+    start = max(0, anchor_idx - half_w)
+    end = min(n, anchor_idx + half_w + 1)
+    segment = signal[start:end]
+    if segment.size == 0:
+        return anchor_idx
+
+    if refine_mode == "extremum":
+        if float(signal[anchor_idx]) >= 0.0:
+            return start + int(np.argmax(segment))
+        return start + int(np.argmin(segment))
+
+    derivative = np.gradient(signal.astype(float))
+    end = min(len(derivative), anchor_idx + half_w + 1)
+    local_deriv = derivative[start:end]
+    if len(local_deriv) < 2:
+        return anchor_idx
+
+    sign_changes = np.diff(np.sign(local_deriv))
+    zero_crossings = np.where(np.abs(sign_changes) > 0)[0]
+    if len(zero_crossings) > 0:
+        anchor_rel = anchor_idx - start
+        zc_idx = start + zero_crossings[
+            np.argmin(np.abs(zero_crossings - anchor_rel))
+        ]
+        signal_peak_idx = zc_idx + 1
+        if 0 <= signal_peak_idx < n:
+            return signal_peak_idx
+
+    segment = signal[start:end]
+    if segment.size == 0:
+        return anchor_idx
+    return start + int(np.argmax(np.abs(segment)))
 

@@ -8,13 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`pyhearts/legacy/unified_presets.py`**: superseded v3.0–v3.2.2 sprint presets moved out of core `config.py`.
+- **`docs/PRESETS.md`**: production vs legacy preset guide; `benchmark_results/README.md` for output layout.
+- **`ProcessCycleConfig.for_human_unified()`** (v3.2.1): production human preset — derivative R + per-cycle P + record STPQ T (threshold apex, w1 floor, morphology window, signed-polarity filter). Default for `PyHEARTS(species="human")`.
 - **QRS Removal for T-wave Detection**: New `qrs_removal.py` module implementing established QRS removal method
   - `remove_qrs_sigmoid()`: Replaces QRS complexes with sigmoid functions to reduce interference
   - `remove_baseline_wander()`: Two-stage baseline removal (750ms + 2000ms windows) for cleaner T-wave detection
   - Integrated into derivative-based peak detection pipeline when `t_wave_use_qrs_removal=True`
-- **T-wave Detection Evaluation Tool**: `test_t_wave_accuracy.py` for comprehensive T-wave detection benchmarking against ECGpuwave and QTDB annotations
+- **T-wave Detection Evaluation Tool**: `test_t_wave_accuracy.py` for comprehensive T-wave detection benchmarking against reference delineation and QTDB annotations
 
 ### Changed
+- **Production default restored to v3.2.1**: `for_human_unified()` again maps to the v3.2.1 signed-polarity STPQ preset. The v3.3a fill-missing-T sprint is archived under `benchmark_results/archive/v33a_sprint_20260526/`; use `for_human_unified_v33a()` only for reproducibility.
+- **Production preset v3.2.1**: `for_human_unified()` now ships threshold T apex, w1 floor, morphology classification, and signed-polarity apex filter. Superseded v3.2.2 (`v322`, `v32_hybrid`) and experimental v3.3 presets moved to `pyhearts.legacy.unified_presets`.
+- **Production preset v3.2**: `for_human_unified()` now matches the former v3.2 hybrid (flat PR BA + v2.12-style T). v3.0 and sprint presets (`v31`, fix1, stage1_rahul, etc.) moved to `pyhearts.legacy.unified_presets`.
+- **Legacy quarantine**: Rahul Stage-1 R (`pyhearts/legacy/`), `LegacyRahulRConfig` + `LegacyHumanConfig` (all `r_rahul_*` removed from `ProcessCycleConfig`). Production `r_detection_method` is `derivative` only. Import regression presets via `from pyhearts.legacy import ...`.
+- **Phase 1 native naming (breaking)**: `record_delineation_stpq_search` (was `record_delineation_rahul_beat_search`); `record_stpq_detection` module (`record_stpq_pt_guesses`, `record_detect_p/t_peak`); `qrs_extrema` for Q/S search; `p_t_detection_method="record_only"` (was `rahul_only`); removed `rahul_pt_detection.py`.
+- **Preset clarity**: `for_human()` documented as legacy v2.3; Rahul/ablation presets tagged `[Regression]`. QTDB benchmark scripts default to `human_unified` only (`--include-regression` for legacy). `tests/conftest.py` `human_config` fixture uses `for_human_unified()`.
 - **T-wave Detection Improvements**:
   - QRS removal now applied before T-wave detection in derivative-based mode using sigmoid replacement to reduce interference from residual depolarization activity
   - SNR gate now uses filtered/QRS-removed signal consistently for accurate SNR calculations

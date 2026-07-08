@@ -3,7 +3,8 @@ import pyhearts as ph
 import warnings
 from scipy import signal as sp_signal
 from scipy.signal import find_peaks
-from typing import Optional, Union, Literal
+from scipy.stats import kurtosis as sp_kurtosis
+from typing import Dict, Literal, Optional, Tuple, Union
 from pyhearts.config import ProcessCycleConfig
 
 
@@ -995,9 +996,11 @@ def _detect_r_peaks_derivative_based(
     slope_factor = sensitivity_factors.get(sensitivity, 0.06)
     slope_threshold = max_slope * slope_factor
     
-    # Apply minimum distance (refractory period) filtering
+    # Minimum distance: detection refractory, floored by PRP spacing when enabled
     distance_samples = max(1, int(round(cfg.rpeak_min_refrac_ms * sampling_rate / 1000.0)))
-    
+    if cfg.r_prp_spacing_in_detection:
+        distance_samples = max(distance_samples, _prp_min_interval_samples(cfg, sampling_rate))
+
     # Find peaks in absolute derivative (high-slope regions)
     # This naturally finds peaks in both directions
     derivative_peaks, _ = find_peaks(
@@ -1080,7 +1083,9 @@ def _detect_r_peaks_derivative_based(
         median_rr_samples = float(np.clip(median_rr_samples, rr_min, rr_max))
         
         distance = max(1, int(round(cfg.rpeak_rr_frac_second_pass * median_rr_samples)))
-        
+        if cfg.r_prp_spacing_in_detection:
+            distance = max(distance, _prp_min_interval_samples(cfg, sampling_rate))
+
         # Re-detect with adaptive distance using find_peaks on absolute derivative
         derivative_peaks, _ = find_peaks(
             abs_derivative,
@@ -1160,8 +1165,7 @@ def _detect_r_peaks_derivative_based(
         rr_intervals = np.diff(filtered_peaks)
         if len(rr_intervals) > 0:
             median_rr = float(np.median(rr_intervals))
-            # Only fill very large gaps (1.7x median - balanced)
-            gap_threshold = 1.7 * median_rr
+            gap_threshold = cfg.r_miss_beat_rr_factor * median_rr
             
             additional_peaks = []
             for i in range(len(rr_intervals)):
@@ -1201,8 +1205,13 @@ def _detect_r_peaks_derivative_based(
                 all_peaks = np.unique(all_peaks)
                 all_peaks = np.sort(all_peaks)
                 
-                # Re-apply distance filtering
+                # Re-apply distance filtering (PRP floor after gap-fill)
                 distance_samples = max(1, int(round(cfg.rpeak_min_refrac_ms * sampling_rate / 1000.0)))
+                if cfg.r_prp_spacing_in_detection:
+                    distance_samples = max(
+                        distance_samples,
+                        _prp_min_interval_samples(cfg, sampling_rate),
+                    )
                 filtered_peaks = [all_peaks[0]]
                 for peak_idx in all_peaks[1:]:
                     if peak_idx - filtered_peaks[-1] >= distance_samples:
@@ -1237,6 +1246,342 @@ def _detect_r_peaks_derivative_based(
         filtered_peaks = np.array(valid_peaks, dtype=int)
     
     return filtered_peaks
+
+
+def _local_kurtosis(
+    signal: np.ndarray,
+    center: int,
+    half_window_samples: int,
+) -> float:
+    """Fisher kurtosis in a window around ``center`` (sharp QRS → higher values)."""
+    center = int(center)
+    half_window_samples = max(1, int(half_window_samples))
+    start = max(0, center - half_window_samples)
+    end = min(len(signal), center + half_window_samples + 1)
+    segment = signal[start:end].astype(float)
+    if segment.size < 4:
+        return 0.0
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        return float(sp_kurtosis(segment, fisher=True, bias=False))
+
+
+def _enforce_minimum_peak_interval(
+    peaks: np.ndarray,
+    ecg: np.ndarray,
+    min_interval_samples: int,
+    kurtosis_half_window_samples: int,
+) -> np.ndarray:
+    """
+    Enforce a hard refractory between detections; when two peaks collide, keep the sharper one.
+    """
+    if peaks.size <= 1 or min_interval_samples <= 0:
+        return peaks.astype(int)
+
+    kept: list[int] = [int(peaks[0])]
+    for peak in peaks[1:]:
+        peak = int(peak)
+        if peak - kept[-1] >= min_interval_samples:
+            kept.append(peak)
+            continue
+        k_prev = _local_kurtosis(ecg, kept[-1], kurtosis_half_window_samples)
+        k_new = _local_kurtosis(ecg, peak, kurtosis_half_window_samples)
+        if k_new > k_prev:
+            kept[-1] = peak
+    return np.array(kept, dtype=int)
+
+
+def _prp_min_interval_samples(cfg: ProcessCycleConfig, sampling_rate: float) -> int:
+    """PRP minimum spacing between R candidates (default 400 ms)."""
+    ms = cfg.r_prp_min_interval_ms
+    if cfg.r_post_detection_refrac_enabled and not cfg.r_prp_spacing_enabled:
+        ms = max(ms, cfg.r_post_detection_refrac_ms)
+    return max(1, int(round(ms * sampling_rate / 1000.0)))
+
+
+def _peaks_per_minute(
+    peaks: np.ndarray, signal_length_samples: int, sampling_rate: float
+) -> float:
+    if peaks.size == 0 or signal_length_samples <= 0 or sampling_rate <= 0:
+        return 0.0
+    duration_min = signal_length_samples / sampling_rate / 60.0
+    if duration_min <= 0:
+        return 0.0
+    return float(peaks.size) / duration_min
+
+
+def _should_apply_kurtosis_filter(
+    peaks: np.ndarray,
+    signal_length_samples: int,
+    sampling_rate: float,
+    cfg: ProcessCycleConfig,
+) -> bool:
+    if not cfg.r_kurtosis_rejection or peaks.size < 3:
+        return False
+    if not cfg.r_kurtosis_apply_only_if_oversegmented:
+        return True
+    ppm = _peaks_per_minute(peaks, signal_length_samples, sampling_rate)
+    if ppm >= cfg.r_kurtosis_oversegmented_peaks_per_min:
+        return True
+    rr = np.diff(np.sort(peaks.astype(int)))
+    med_rr = float(np.median(rr))
+    if not np.isfinite(med_rr) or med_rr <= 0:
+        return False
+    expected_n = signal_length_samples / med_rr
+    return float(peaks.size) > 1.35 * expected_n
+
+
+def _peak_kurtosis_values(
+    ecg: np.ndarray, peaks: np.ndarray, sampling_rate: float, cfg: ProcessCycleConfig
+) -> np.ndarray:
+    half_w = max(1, int(round(cfg.r_kurtosis_window_ms * sampling_rate / 1000.0)))
+    return np.array([_local_kurtosis(ecg, int(p), half_w) for p in peaks], dtype=float)
+
+
+def _reject_low_kurtosis_legacy_median(
+    k_vals: np.ndarray, peaks: np.ndarray, cfg: ProcessCycleConfig
+) -> np.ndarray:
+    sorted_k = np.sort(k_vals)
+    ref_k = float(np.median(sorted_k[len(sorted_k) // 2 :]))
+    if not np.isfinite(ref_k) or ref_k <= 0.0:
+        ref_k = float(np.median(k_vals))
+    threshold = cfg.r_kurtosis_fraction_of_median * ref_k
+    return peaks[k_vals >= threshold].astype(int)
+
+
+def _reject_low_kurtosis_sharpest_peak(
+    k_vals: np.ndarray, peaks: np.ndarray, cfg: ProcessCycleConfig
+) -> np.ndarray:
+    """
+    Discard peaks less sharp than the sharpest detection (global kurtosis reference).
+    """
+    ref_k = float(np.max(k_vals))
+    if not np.isfinite(ref_k) or ref_k <= 0.0:
+        return peaks.astype(int)
+    threshold = cfg.r_kurtosis_fraction_of_sharpest * ref_k
+    return peaks[k_vals >= threshold].astype(int)
+
+
+def _reject_low_kurtosis_local_rr(
+    ecg: np.ndarray,
+    k_vals: np.ndarray,
+    peaks: np.ndarray,
+    sampling_rate: float,
+    cfg: ProcessCycleConfig,
+) -> np.ndarray:
+    """Reject peaks with kurtosis below local RR-neighborhood sharpest R."""
+    if peaks.size < 2:
+        return peaks.astype(int)
+    rr = np.diff(np.sort(peaks))
+    rr_med = float(np.median(rr))
+    if not np.isfinite(rr_med) or rr_med <= 0:
+        return _reject_low_kurtosis_sharpest_peak(k_vals, peaks, cfg)
+    neighbor = int(round(1.2 * rr_med))
+    keep = np.ones(peaks.size, dtype=bool)
+    order = np.argsort(peaks)
+    sorted_peaks = peaks[order]
+    sorted_k = k_vals[order]
+    for i, (peak, k_val) in enumerate(zip(sorted_peaks, sorted_k)):
+        lo = int(peak) - neighbor
+        hi = int(peak) + neighbor
+        in_win = (sorted_peaks >= lo) & (sorted_peaks <= hi)
+        ref_k = float(np.max(sorted_k[in_win]))
+        if k_val < cfg.r_kurtosis_fraction_of_sharpest * ref_k:
+            keep[order[i]] = False
+    return peaks[keep].astype(int)
+
+
+def _reject_low_kurtosis_r_peaks(
+    ecg: np.ndarray,
+    peaks: np.ndarray,
+    sampling_rate: float,
+    cfg: ProcessCycleConfig,
+) -> np.ndarray:
+    """Drop broad low-kurtosis false R peaks (T waves, ripple on filtered ECG)."""
+    if peaks.size < 3 or not cfg.r_kurtosis_rejection:
+        return peaks.astype(int)
+    if not _should_apply_kurtosis_filter(
+        peaks, len(ecg), sampling_rate, cfg
+    ):
+        return peaks.astype(int)
+
+    k_vals = _peak_kurtosis_values(ecg, peaks, sampling_rate, cfg)
+    mode = cfg.r_kurtosis_reference_mode
+    if mode == "legacy_median":
+        return _reject_low_kurtosis_legacy_median(k_vals, peaks, cfg)
+    if mode == "local_rr_neighbor":
+        return _reject_low_kurtosis_local_rr(ecg, k_vals, peaks, sampling_rate, cfg)
+    return _reject_low_kurtosis_sharpest_peak(k_vals, peaks, cfg)
+
+
+def _refine_r_peaks_trp(
+    ecg: np.ndarray,
+    peaks: np.ndarray,
+    polarity_hints: np.ndarray,
+    sampling_rate: float,
+    half_window_ms: float,
+) -> np.ndarray:
+    """Map each detection to the local extremum on ``ecg`` within ±half_window_ms (TRP)."""
+    half_w = max(1, int(round(half_window_ms * sampling_rate / 1000.0)))
+    refined: list[int] = []
+    n = len(ecg)
+    for peak, polarity in zip(peaks, polarity_hints):
+        peak = int(peak)
+        start = max(0, peak - half_w)
+        end = min(n, peak + half_w + 1)
+        segment = ecg[start:end]
+        if segment.size == 0:
+            refined.append(peak)
+            continue
+        if float(polarity) >= 0.0:
+            refined.append(start + int(np.argmax(segment)))
+        else:
+            refined.append(start + int(np.argmin(segment)))
+    return np.array(refined, dtype=int)
+
+
+def _postprocess_r_peaks_phase_a(
+    peaks: np.ndarray,
+    ecg_filtered: np.ndarray,
+    trp_signal: np.ndarray,
+    sampling_rate: float,
+    cfg: ProcessCycleConfig,
+    *,
+    return_stats: bool = False,
+) -> Union[np.ndarray, Tuple[np.ndarray, Dict[str, int]]]:
+    """400 ms gate, kurtosis false-R removal, and TRP extremum refinement."""
+    stats: Dict[str, int] = {
+        "n_before_phase_a": int(peaks.size),
+        "n_after_prp_spacing": int(peaks.size),
+        "n_after_refrac": int(peaks.size),
+        "n_after_kurtosis": int(peaks.size),
+        "n_after_trp": int(peaks.size),
+        "kurtosis_applied": 0,
+    }
+    if peaks.size == 0:
+        if return_stats:
+            return peaks.astype(int), stats
+        return peaks.astype(int)
+
+    peaks = np.sort(np.unique(peaks.astype(int)))
+    stats["n_before_phase_a"] = int(peaks.size)
+    k_half_w = max(1, int(round(cfg.r_kurtosis_window_ms * sampling_rate / 1000.0)))
+
+    apply_prp = cfg.r_prp_spacing_enabled or cfg.r_post_detection_refrac_enabled
+    if apply_prp:
+        prp_gap = _prp_min_interval_samples(cfg, sampling_rate)
+        peaks = _enforce_minimum_peak_interval(
+            peaks, ecg_filtered, prp_gap, k_half_w
+        )
+    stats["n_after_prp_spacing"] = int(peaks.size)
+    stats["n_after_refrac"] = int(peaks.size)
+
+    stats["kurtosis_applied"] = int(
+        _should_apply_kurtosis_filter(peaks, len(ecg_filtered), sampling_rate, cfg)
+    )
+    if stats["kurtosis_applied"] and cfg.r_kurtosis_rejection:
+        peaks = _reject_low_kurtosis_r_peaks(
+            ecg_filtered, peaks, sampling_rate, cfg
+        )
+    stats["n_after_kurtosis"] = int(peaks.size)
+    if cfg.r_trp_on_input_signal and peaks.size > 0:
+        clip_idx = np.clip(peaks, 0, len(ecg_filtered) - 1)
+        polarity = np.sign(ecg_filtered[clip_idx])
+        polarity[polarity == 0] = 1.0
+        peaks = _refine_r_peaks_trp(
+            trp_signal,
+            peaks,
+            polarity,
+            sampling_rate,
+            cfg.r_anchor_refine_half_window_ms,
+        )
+    stats["n_after_trp"] = int(peaks.size)
+    peaks = peaks.astype(int)
+    if return_stats:
+        return peaks, stats
+    return peaks
+
+
+def _run_primary_r_detection(
+    ecg: np.ndarray,
+    ecg_filtered: np.ndarray,
+    sampling_rate: float,
+    cfg: ProcessCycleConfig,
+    sensitivity: Literal["standard", "high", "maximum"],
+    *,
+    raw_ecg: Optional[np.ndarray] = None,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Primary R detector pass.
+
+    Returns (peaks, ecg_filtered_for_phase_a, trp_signal).
+    """
+    trp_signal = ecg
+    if raw_ecg is not None:
+        raw_arr = np.asarray(raw_ecg, dtype=float)
+        if raw_arr.ndim == 1 and raw_arr.size == ecg.size:
+            trp_signal = raw_arr
+
+    peaks = _detect_r_peaks_derivative_based(
+        ecg_filtered,
+        sampling_rate,
+        cfg,
+        sensitivity,
+    )
+    return peaks, ecg_filtered, trp_signal
+
+
+def r_peak_detection_funnel_stats(
+    ecg: Union[np.ndarray, list[float]],
+    sampling_rate: float,
+    *,
+    cfg: ProcessCycleConfig,
+    sensitivity: Literal["standard", "high", "maximum"] = "standard",
+    raw_ecg: Optional[np.ndarray] = None,
+) -> Dict[str, int]:
+    """
+    Count R peaks at each detection/post-process stage (derivative → Phase A).
+
+    Used by QTDB funnel diagnostics; does not run epoching or per-cycle processing.
+    """
+    ecg_arr = np.asarray(ecg, dtype=float)
+    if cfg.rpeak_preprocess:
+        ecg_filtered = _bandpass_filter(
+            ecg_arr,
+            sampling_rate,
+            highpass_hz=cfg.rpeak_highpass_hz,
+            lowpass_hz=cfg.rpeak_lowpass_hz,
+            order=cfg.rpeak_filter_order,
+            notch_hz=cfg.rpeak_notch_hz,
+        )
+    else:
+        ecg_filtered = ecg_arr
+
+    derivative_peaks, ecg_filtered, trp_signal = _run_primary_r_detection(
+        ecg_arr,
+        ecg_filtered,
+        sampling_rate,
+        cfg,
+        sensitivity,
+        raw_ecg=raw_ecg,
+    )
+
+    _, phase_stats = _postprocess_r_peaks_phase_a(
+        derivative_peaks,
+        ecg_filtered,
+        trp_signal,
+        sampling_rate,
+        cfg,
+        return_stats=True,
+    )
+    return {
+        "n_derivative": int(derivative_peaks.size),
+        "n_after_prp_spacing": phase_stats.get(
+            "n_after_prp_spacing", phase_stats["n_after_refrac"]
+        ),
+        **phase_stats,
+        "n_after_phase_a": phase_stats["n_after_trp"],
+    }
 
 
 def r_peak_detection(
@@ -1291,7 +1636,7 @@ def r_peak_detection(
         - "high": Higher recall (~+15%), slightly lower precision
         - "maximum": Maximum recall, may include some noise
     raw_ecg : array-like, optional
-        Raw (unfiltered) ECG signal. Kept for compatibility but not used for polarity detection.
+        Unfiltered ECG used for TRP extremum refinement when ``cfg.r_trp_on_input_signal``.
     
     Returns
     -------
@@ -1304,7 +1649,6 @@ def r_peak_detection(
     if sampling_rate <= 0:
         raise ValueError("`sampling_rate` must be > 0.")
 
-    # ----- Optional preprocessing for noise robustness -----
     if cfg.rpeak_preprocess:
         ecg_filtered = _bandpass_filter(
             ecg,
@@ -1317,14 +1661,21 @@ def r_peak_detection(
     else:
         ecg_filtered = ecg
 
-    # ----- Derivative-based single-pass detection -----
-    # Works with signal as-is, finds zero-crossings in derivative,
-    # filters by slope magnitude - naturally handles both polarities
-    final_filtered_r_peaks = _detect_r_peaks_derivative_based(
+    final_filtered_r_peaks, ecg_filtered, trp_signal = _run_primary_r_detection(
+        ecg,
         ecg_filtered,
         sampling_rate,
         cfg,
-        sensitivity
+        sensitivity,
+        raw_ecg=raw_ecg,
+    )
+
+    final_filtered_r_peaks = _postprocess_r_peaks_phase_a(
+        final_filtered_r_peaks,
+        ecg_filtered,
+        trp_signal,
+        sampling_rate,
+        cfg,
     )
 
     # ----- Optional plotting -----
