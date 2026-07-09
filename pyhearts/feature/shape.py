@@ -7,8 +7,9 @@ from pyhearts.config import ProcessCycleConfig
 
 def _integrate_trapezoid(y: np.ndarray, *, dx: float) -> float:
     """Trapezoidal integration compatible with NumPy 1.x (trapz) and 2.x (trapezoid)."""
-    integrate = getattr(np, "trapezoid", np.trapz)
-    return float(integrate(y, dx=dx))
+    if hasattr(np, "trapezoid"):
+        return float(np.trapezoid(y, dx=dx))
+    return float(np.trapz(y, dx=dx))
 
 
 def compute_interdeflection_differences(
