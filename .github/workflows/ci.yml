@@ -28,7 +28,7 @@ jobs:
         env:
           MPLBACKEND: Agg
         run: |
-          python -m pytest -m "not slow and not integration" --cov=pyhearts --cov-report=term-missing --cov-report=xml
+          python -m pytest tests/ --cov=pyhearts --cov-report=term-missing --cov-report=xml --durations=10
 
       - name: Upload coverage.xml
         uses: actions/upload-artifact@v4

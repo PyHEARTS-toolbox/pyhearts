@@ -301,3 +301,6 @@ verify_*.py
 # Local-only legacy presets and analysis scripts (not shipped in the toolbox)
 pyhearts/legacy/
 scripts/
+
+# Local-only archived sprint/ablation tests (not run in CI)
+tests/archive/

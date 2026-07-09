@@ -81,6 +81,7 @@ pyhearts = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+norecursedirs = [".git", ".tox", "dist", "build", "archive"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 addopts = [
@@ -91,6 +92,7 @@ addopts = [
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
+    "smoke: minimal install/API smoke tests (default CI scope)",
 ]
 
 [tool.coverage.run]
