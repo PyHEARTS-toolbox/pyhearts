@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-07-17
+
+### Added
+- Self-contained T-only hybrid pipeline combining the validated 2025
+  R/P/cycle/Gaussian core with record-level STPQ T detection.
+- Explicit `T_gaussian_global_center_idx` column preserving the Gaussian T
+  center separately from the STPQ `T_global_center_idx`.
+- Hybrid provenance and both resolved configurations in saved metadata.
+- Hybrid regression, output, and packaging tests.
+
+### Changed
+- The public `pyhearts.PyHEARTS` class now runs the validated hybrid in-process.
+- Package version advanced to 2.0.0.
+- NeuroKit2 and WFDB moved to optional dependency groups.
+- README replaced with install, usage, output-semantics, validation, and
+  development documentation for the frozen hybrid release.
+
+### Validation
+- Packaged SPH normal-repeat run: 802 recordings, 9,300 cycles, median R²
+  0.9688, 83.83% of fitted cycles above R² 0.9, and 98.06% T availability.
+- QTDB manual subset: 300 expert beats, 99.67% R sensitivity, 80.94% P
+  sensitivity, and 69.00% T sensitivity within ±40 ms.
+
+## Pre-2.0 development history
+
 ### Added
 - **`pyhearts/legacy/unified_presets.py`**: superseded v3.0–v3.2.2 sprint presets moved out of core `config.py`.
 - **`docs/PRESETS.md`**: production vs legacy preset guide; `benchmark_results/README.md` for output layout.
@@ -54,7 +79,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Configuration
 - Added `t_wave_use_qrs_removal: bool = True` to `ProcessCycleConfig` (enabled by default in `for_human()` preset)
 - Updated `for_human()` preset: `snr_mad_multiplier` for T-waves reduced from 1.5 to 0.8
-- Defaulted `use_skewed_gaussian` to `True` (skew-normal/alpha parameter enabled for all fitted Gaussian components; alpha initializes at 0 for symmetry)
+- Removed skewed-Gaussian fitting (`use_skewed_gaussian` / `skew_bounds`); waveform fits always use a symmetric 3-parameter Gaussian (center, height, std) for speed
 
 ### Validation
 - T-wave detection evaluation on QTDB dataset:

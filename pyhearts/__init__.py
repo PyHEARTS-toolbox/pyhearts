@@ -4,18 +4,13 @@ PyHEARTS: Python Heart Evaluation and Analysis for Rhythm and Temporal Shape.
 Beat-by-beat ECG waveform morphology mapping for interpretable machine learning and AI.
 """
 
-from .version import __version__
+# Submodules
+from . import feature, fitmetrics, io, plots, processing
+from ._legacy2025 import ProcessCycleConfig as CoreProcessCycleConfig
 
 # Core classes
 from .config import ProcessCycleConfig
-from .core.fit import PyHEARTS
-
-# Submodules
-from . import feature
-from . import fitmetrics
-from . import io
-from . import plots
-from . import processing
+from .core.hybrid import PyHEARTS
 
 # I/O helpers
 from .io import (
@@ -24,10 +19,12 @@ from .io import (
     pick_lead_index,
     pick_manual_annotation_ext,
 )
+from .version import __version__
 
 # Signal generation (optional - requires neurokit2 which needs Python 3.10+)
 try:
     from .sim import generate_ecg_signal
+
     _HAS_SIM = True
 except (ImportError, TypeError):
     generate_ecg_signal = None  # type: ignore[assignment, misc]
@@ -39,6 +36,7 @@ __all__ = [
     # Core
     "PyHEARTS",
     "ProcessCycleConfig",
+    "CoreProcessCycleConfig",
     # I/O
     "load_monitor_csv",
     "load_wfdb_signal",

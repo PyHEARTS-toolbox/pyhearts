@@ -1,5 +1,5 @@
 import numpy as np
-from typing import Dict, Tuple, Union
+from typing import Dict, Tuple, Optional, Union
 
 
 def compute_gauss_std(
@@ -53,6 +53,9 @@ def compute_gauss_std(
 
     return std_dict
 
+
+from typing import Union
+import numpy as np
 
 def gaussian_function(
     xs: Union[np.ndarray, list[float]],

@@ -1,13 +1,14 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=77.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyhearts"
-version = "1.0.0"
-description = "Beat-by-beat ECG waveform morphology mapping for interpretable machine learning and AI"
+version = "2.0.0"
+description = "Validated beat-by-beat ECG morphology analysis with record-level STPQ T detection"
 readme = "README.md"
-license = {text = "Proprietary - UC Regents"}
+license = "LicenseRef-Proprietary"
+license-files = ["LICENSE.md"]
 authors = [
     {name = "Morgan Fitzgerald"}
 ]
@@ -29,7 +30,6 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
     "Intended Audience :: Healthcare Industry",
-    "License :: Other/Proprietary License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
@@ -42,22 +42,34 @@ classifiers = [
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "numpy>=1.20.0",
-    "pandas>=1.3.0",
-    "scipy>=1.7.0",
-    "PyWavelets>=1.1.0",
-    "matplotlib>=3.4.0",
-    "neurokit2>=0.2.0",
+    "numpy>=1.23.0,<3",
+    "pandas>=1.5.0,<3",
+    "scipy>=1.9.0,<2",
+    "PyWavelets>=1.4.0,<2",
+    "matplotlib>=3.6.0,<4",
 ]
 
 [project.optional-dependencies]
+sim = [
+    "neurokit2>=0.2.0",
+]
+wfdb = [
+    "wfdb>=4.1.0",
+]
+all = [
+    "neurokit2>=0.2.0",
+    "wfdb>=4.1.0",
+]
 dev = [
+    "build>=1.2.0",
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "coverage>=7.0.0",
     "ruff>=0.1.0",
     "mypy>=1.0.0",
     "pandas-stubs>=1.5.0",
+    "twine>=5.0.0",
+    "wfdb>=4.1.0",
 ]
 docs = [
     "sphinx>=6.0.0",

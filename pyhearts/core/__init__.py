@@ -1,5 +1,5 @@
-"""Core PyHEARTS analysis class."""
+"""Core PyHEARTS analysis classes."""
 
-from .fit import PyHEARTS
+from .hybrid import PyHEARTS
 
 __all__ = ["PyHEARTS"]

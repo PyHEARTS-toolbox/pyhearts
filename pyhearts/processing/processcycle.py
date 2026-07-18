@@ -21,9 +21,9 @@ from pyhearts.feature import calc_intervals, interval_ms, extract_shape_features
 from pyhearts.feature.st_segment import extract_st_segment_features
 from pyhearts.fitmetrics import calc_r_squared, calc_rmse
 from pyhearts.plots import plot_fit, plot_labeled_peaks, plot_rise_decay
-from .bounds import calc_bounds, calc_bounds_skewed
+from .bounds import calc_bounds
 from .detrend import detrend_signal
-from .gaussian import compute_gauss_std, gaussian_function, skewed_gaussian_function
+from .gaussian import compute_gauss_std, gaussian_function
 from .peaks import (
     cycle_rel_to_global_sample,
     find_peaks,
@@ -1774,10 +1774,7 @@ def process_cycle(
 
         # Estimate standard deviations
         std_dict = compute_gauss_std(sig_detrended, guess_idxs)
-    
-        # Determine if using skewed Gaussian
-        use_skewed = cfg.use_skewed_gaussian
-        params_per_peak = 4 if use_skewed else 3
+        params_per_peak = 3  # center, height, std (symmetric Gaussian only)
 
         guess_dict = {}
         for comp, (center, height) in guess_idxs.items():
@@ -1787,14 +1784,12 @@ def process_cycle(
                 prev_feat = previous_gauss_features[comp]
                 if len(prev_feat) >= 3:
                     prev_std = prev_feat[2]
-                    prev_alpha = prev_feat[3] if len(prev_feat) >= 4 and use_skewed else 0.0
                 else:
                     # Fallback to computed std
                     prev_std = std_dict.get(comp)
-                    prev_alpha = 0.0
-            
+
                 std_guess = max(prev_std, 0.5) if prev_std is not None else std_dict.get(comp)
-            
+
                 # CRITICAL FIX: For R, ALWAYS ensure it's included in the fit when detected
                 # Priority: 1) r_std (pre-computed, most reliable), 2) prev_std/std_dict, 3) default fallback
                 if comp == "R":
@@ -1812,23 +1807,20 @@ def process_cycle(
                         if verbose:
                             print(f"[Cycle {cycle_idx}]: Using default r_std={std_guess:.2f} for R (r_std, prev_std, and std_dict all None)")
                         _cycle_debug(f"[R_STD_DEFAULT] Cycle {cycle_idx}: Using default r_std={std_guess:.2f} for R (previous cycle path, all std estimates None)")
-            
+
                 if std_guess is not None:
                     std_guess = max(std_guess, 0.5)
                     if verbose:
                         print(f"[Cycle {cycle_idx}]: Using {comp} with previous cycle seed: center={int(round(center))}, height={float(height):.4f}, std={std_guess:.2f}")
-                
-                    if use_skewed:
-                        guess_dict[comp] = [int(round(center)), float(height), std_guess, prev_alpha]
-                    else:
-                        guess_dict[comp] = [int(round(center)), float(height), std_guess]
+
+                    guess_dict[comp] = [int(round(center)), float(height), std_guess]
                 else:
                     if verbose:
                         print(f"[Cycle {cycle_idx}]: Skipping {comp}. No std estimate available.")
             else:
                 # No previous cycle available, compute from detected peaks
                 std_guess = std_dict.get(comp)
-            
+
                 # CRITICAL FIX: For R, ALWAYS ensure it's included in the fit when detected
                 # Priority: 1) r_std (pre-computed, most reliable), 2) std_dict value, 3) default fallback
                 if comp == "R":
@@ -1847,19 +1839,15 @@ def process_cycle(
                         if verbose:
                             print(f"[Cycle {cycle_idx}]: Using default r_std={std_guess:.2f} for R (r_std and std_dict both None)")
                         _cycle_debug(f"[R_STD_DEFAULT] Cycle {cycle_idx}: Using default r_std={std_guess:.2f} for R (r_std=None, std_dict.get('R')=None)")
-        
+
                 if std_guess is not None:
                     # Optional: enforce only a numerical stability floor
                     std_guess = max(std_guess, 0.5)
-    
+
                     if verbose:
                         print(f"[Cycle {cycle_idx}]: Using {comp} std guess: {std_guess:.2f} samples (no clamping)")
-    
-                    if use_skewed:
-                        # Add alpha=0.0 as initial guess (symmetric)
-                        guess_dict[comp] = [int(round(center)), float(height), std_guess, 0.0]
-                    else:
-                        guess_dict[comp] = [int(round(center)), float(height), std_guess]
+
+                    guess_dict[comp] = [int(round(center)), float(height), std_guess]
                 else:
                     if verbose:
                         print(f"[Cycle {cycle_idx}]: Skipping {comp}. No std estimate available.")
@@ -1876,7 +1864,7 @@ def process_cycle(
         guess = np.array(guess_list)
 
         if verbose:
-            print(f"[Cycle {cycle_idx}]: Initial Gaussian guess shape: {guess.shape} ({'skewed' if use_skewed else 'symmetric'})")
+            print(f"[Cycle {cycle_idx}]: Initial Gaussian guess shape: {guess.shape} (symmetric)")
             print(f"[Cycle {cycle_idx}]: Components in guess_dict: {list(guess_dict.keys())}")
 
         # Determine valid components (keys)
@@ -1900,7 +1888,7 @@ def process_cycle(
             fitting_success = False
             # Initialize p0 and fit_func to avoid UnboundLocalError later
             p0 = np.array([])
-            fit_func = gaussian_function  # Default to symmetric Gaussian
+            fit_func = gaussian_function
         else:
             valid_guess = np.array(valid_guess_list)
             if verbose:
@@ -1911,31 +1899,24 @@ def process_cycle(
                 print(f"[Cycle {cycle_idx}]: Calculating bounds for Gaussian components...")
 
             bound_factor = cfg.bound_factor
-            if use_skewed:
-                valid_gaus_bounds = [
-                    calc_bounds_skewed(center, height, std, alpha, bound_factor, cfg.skew_bounds)
-                    for center, height, std, alpha in valid_guess
-                ]
-            else:
-                valid_gaus_bounds = [calc_bounds(center, height, std, bound_factor) for center, height, std in valid_guess]
+            valid_gaus_bounds = [calc_bounds(center, height, std, bound_factor) for center, height, std in valid_guess]
             lower_bounds, upper_bounds = zip(*valid_gaus_bounds)
             bounds = (np.array(lower_bounds).flatten(), np.array(upper_bounds).flatten())
 
             if verbose:
                 print(f"[Cycle {cycle_idx}]: Bounds computed")
 
-            # Select fitting function
-            fit_func = skewed_gaussian_function if use_skewed else gaussian_function
+            fit_func = gaussian_function
 
             # Perform curve fitting
             p0 = valid_guess.flatten()
-        
+
             # Clamp guess within bounds to avoid "x0 is infeasible" error
             # This ensures the initial guess is within bounds, especially important for
             # std values where float std_guess can exceed truncated int bounds
             epsilon = 1e-8  # small number to avoid edge
             p0 = np.clip(p0, bounds[0] + epsilon, bounds[1] - epsilon)
-        
+
             if verbose:
                 print(f"[Cycle {cycle_idx}]: Preparing to run curve_fit...")
             try:
@@ -1962,46 +1943,29 @@ def process_cycle(
         # --------------------------------------------
         if fitting_success:
             gaussian_features_reshape = gaussian_features_fit.reshape(-1, params_per_peak)
-            if use_skewed:
+            if gaussian_features_reshape.shape[1] >= 3:
                 gauss_center_idxs = gaussian_features_reshape[:, 0]
                 gauss_heights = gaussian_features_reshape[:, 1]
                 gauss_stdevs = gaussian_features_reshape[:, 2]
-                gauss_alphas = gaussian_features_reshape[:, 3]
-                previous_gauss_features = {
-                    comp: [center, height, std, alpha]
-                    for comp, center, height, std, alpha in zip(
-                        valid_components, gauss_center_idxs, gauss_heights, gauss_stdevs, gauss_alphas
-                    )
-                }
             else:
-                # When not using skewed, only extract first 3 columns (center, height, std)
-                # Handle case where reshape might have more columns than expected
-                if gaussian_features_reshape.shape[1] >= 3:
-                    gauss_center_idxs = gaussian_features_reshape[:, 0]
-                    gauss_heights = gaussian_features_reshape[:, 1]
-                    gauss_stdevs = gaussian_features_reshape[:, 2]
-                else:
-                    # Fallback if shape is unexpected
-                    gauss_center_idxs = gaussian_features_reshape[:, 0] if gaussian_features_reshape.shape[1] >= 1 else np.array([])
-                    gauss_heights = gaussian_features_reshape[:, 1] if gaussian_features_reshape.shape[1] >= 2 else np.array([])
-                    gauss_stdevs = gaussian_features_reshape[:, 2] if gaussian_features_reshape.shape[1] >= 3 else np.array([])
-                gauss_alphas = None
-                previous_gauss_features = {
-                    comp: [center, height, std]
-                    for comp, center, height, std in zip(
-                        valid_components, gauss_center_idxs, gauss_heights, gauss_stdevs
-                    )
-                }
+                gauss_center_idxs = gaussian_features_reshape[:, 0] if gaussian_features_reshape.shape[1] >= 1 else np.array([])
+                gauss_heights = gaussian_features_reshape[:, 1] if gaussian_features_reshape.shape[1] >= 2 else np.array([])
+                gauss_stdevs = gaussian_features_reshape[:, 2] if gaussian_features_reshape.shape[1] >= 3 else np.array([])
+            previous_gauss_features = {
+                comp: [center, height, std]
+                for comp, center, height, std in zip(
+                    valid_components, gauss_center_idxs, gauss_heights, gauss_stdevs
+                )
+            }
             if verbose:
                 print(f"[Cycle {cycle_idx}]: Updated 'previous_gauss_features': {list(previous_gauss_features.keys())}")
             gaussian_features_to_use = gaussian_features_fit
-    
+
         else:
             previous_gauss_features = None
             gauss_center_idxs = np.array([])
             gauss_heights = np.array([])
             gauss_stdevs = np.array([])
-            gauss_alphas = None
             gaussian_features_to_use = np.full((len(p0),), np.nan)
 
         # Ensure flat array for use in Gaussian function

@@ -1,56 +1,79 @@
-# PyHEARTS configuration presets
+# PyHEARTS 2.0 pipeline presets
 
-## Production (use this)
+PyHEARTS 2.0 separates the 2025 morphology-core configuration from the STPQ
+T-detector configuration.
 
-| Species | How to run | Config |
-|---------|------------|--------|
-| Human | `PyHEARTS(sampling_rate=fs, species="human")` | `ProcessCycleConfig.for_human_unified()` |
-| Mouse | `PyHEARTS(sampling_rate=fs, species="mouse")` | `ProcessCycleConfig.for_mouse()` |
-
-`for_human_unified()`: derivative R + per-cycle P + record STPQ T on median-baseline
-trace (no Savitzky–Golay). Threshold T apex, w1 floor (40% S→Q), morphology window,
-signed-polarity apex filter, template-guided reconcile. Record T overwrites finite
-per-cycle T; P is retained from per-cycle detection.
+## Recommended human run
 
 ```python
 from pyhearts import PyHEARTS
-from pyhearts.config import ProcessCycleConfig
 
 analyzer = PyHEARTS(
-    sampling_rate=250.0,
-    cfg=ProcessCycleConfig.for_human_unified(),
+    sampling_rate=500.0,
+    species="human",
 )
-features_df, cycles_df = analyzer.analyze_ecg(ecg_mv)
+features, cycles = analyzer.analyze_ecg(filtered_ecg)
 ```
 
-## Other human presets on `ProcessCycleConfig`
+This selects:
 
-| Method | Role |
-|--------|------|
-| `for_human()` | Earlier human baseline (per-cycle P/T only; not the `species="human"` default) |
-| `for_human_unified_template_prior_phase1()` | Template-prior windows experiment (skips record STPQ overwrite) |
-| `for_human_unified_v33a()` | Archived fill-missing-T variant |
+- `CoreProcessCycleConfig.for_human()` for the 2025 R/P/Gaussian core.
+- `ProcessCycleConfig.for_human_unified()` for record-level STPQ T.
 
-R detection is **derivative + Phase A** only (`r_detection_method="derivative"`).
+## Validated SPH configuration
 
-## QTDB lead policy
-
-PyHEARTS, benchmarks, and Bland–Altman comparisons should use the **same WFDB channel**
-as the expert annotation file (`q1c` vs `q2c`).
-
-| Policy | Channel | Manual ann |
-|--------|---------|------------|
-| `ecg2_else_ecg1` (default) | ECG2 if named, else ECG1, else limb (MLII/II), else 0 | `q2c` if index 1, else `q1c` |
-| `first` | Always channel 0 | `q1c` |
-| `second` | Channel 1 if present | `q2c` |
-| `limb_preferred` | MLII / II / ECG1-style names | per index |
+The full 802-record SPH benchmark used the species-agnostic 2025 core defaults:
 
 ```python
-from pyhearts import load_wfdb_signal, pick_manual_annotation_ext
-
-ecg, fs, lead_idx, lead_name = load_wfdb_signal("data/qtdb/1.0.0/sel100", "ecg2_else_ecg1")
-ann_ext = pick_manual_annotation_ext(["MLII", "V5"])  # -> "q1c"
+analyzer = PyHEARTS(sampling_rate=500.0)
 ```
 
-Output CSV columns include `p_source`, `t_source`, `p_confidence`, `t_confidence`,
-`wfdb_lead_index`, `wfdb_lead_name`, `lead_policy`, `manual_ann_ext`.
+STPQ T remains enabled. This is intentionally distinct from
+`species="human"` so the published SPH result can be reproduced.
+
+## Mouse configuration
+
+```python
+analyzer = PyHEARTS(sampling_rate=2000.0, species="mouse")
+```
+
+The mouse preset uses the 2025 mouse core and disables the human STPQ T pass by
+default. It can be enabled explicitly with `apply_stpq_t=True`, but that
+combination has not been validated.
+
+## Advanced configuration
+
+```python
+from pyhearts import (
+    CoreProcessCycleConfig,
+    ProcessCycleConfig,
+    PyHEARTS,
+)
+
+core_cfg = CoreProcessCycleConfig.for_human()
+stpq_cfg = ProcessCycleConfig.for_human_unified()
+
+analyzer = PyHEARTS(
+    sampling_rate=500.0,
+    core_cfg=core_cfg,
+    cfg=stpq_cfg,
+)
+```
+
+The 2025 core always uses symmetric three-parameter Gaussians. There is no
+skewed-Gaussian runtime option.
+
+## QTDB annotation policy
+
+The frozen manual benchmark used ECG1 (channel 0) with the `q1c`
+cardiologist annotations. Lead choice must remain fixed when comparing
+pipelines because ECG2 performed poorly against this local reference subset.
+
+```python
+from pyhearts import load_wfdb_signal
+
+ecg, fs, lead_idx, lead_name = load_wfdb_signal(
+    "data/qtdb/sel46",
+    lead_policy="first",
+)
+```

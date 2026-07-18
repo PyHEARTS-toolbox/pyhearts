@@ -1,2 +1,3 @@
-"""Set the current pypi version"""
-__version__ = '1.0.0'
+"""Package version for the frozen validated hybrid release."""
+
+__version__ = "2.0.0"

@@ -3,9 +3,8 @@
 import numpy as np
 import pandas as pd
 import pytest
-from dataclasses import replace
 
-from pyhearts import PyHEARTS, ProcessCycleConfig
+from pyhearts import ProcessCycleConfig, PyHEARTS
 
 
 def _short_ecg(sampling_rate: float = 500.0, beats: int = 5) -> np.ndarray:
@@ -26,22 +25,21 @@ def test_default_config_instantiates():
     ProcessCycleConfig()
 
 
-def test_human_species_uses_unified_preset():
-    cfg = PyHEARTS(sampling_rate=500.0, species="human").cfg
-    assert cfg.version == "human-unified"
-    assert cfg.record_delineation is True
+def test_human_species_uses_hybrid_pipeline():
+    analyzer = PyHEARTS(sampling_rate=500.0, species="human")
+    assert analyzer.cfg.version == "hybrid-t-2025-stpq"
+    assert analyzer.core_cfg.version == "v1-human"
+    assert analyzer.apply_stpq_t is True
 
 
 @pytest.mark.smoke
-def test_analyze_ecg_smoke_lite():
-    """One end-to-end beat on a short trace (lite_mode for speed)."""
+def test_analyze_ecg_smoke():
+    """End-to-end hybrid analysis returns fitted cycles and STPQ T centers."""
     fs = 500.0
-    cfg = replace(
-        ProcessCycleConfig.for_human_unified(),
-        lite_mode=True,
-        record_delineation_min_beats=3,
-    )
-    out, epochs = PyHEARTS(sampling_rate=fs, cfg=cfg).analyze_ecg(_short_ecg(fs))
+    out, epochs = PyHEARTS(sampling_rate=fs, species="human").analyze_ecg(_short_ecg(fs, beats=8))
     assert isinstance(out, pd.DataFrame)
     assert isinstance(epochs, pd.DataFrame)
     assert len(out) >= 1
+    assert "T_global_center_idx" in out
+    assert "T_gaussian_global_center_idx" in out
+    assert "t_source" in out
