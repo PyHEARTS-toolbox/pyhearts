@@ -36,6 +36,13 @@ analyzer = PyHEARTS(sampling_rate=2000.0, species="mouse")
 
 Uses the mouse morphology preset and disables the human record-level T stage by default.
 
+## Heart rate variability
+
+Optional HRV (`analyzer.compute_hrv_metrics()`) uses successive intervals from
+the **detected R-peak series** (before epoch quality filtering), gated by
+`rr_bounds_ms`. It does not use morphology-retained `RR_interval_ms` rows.
+Requires ≥60 valid RR intervals; returns mean heart rate, SDNN, RMSSD, and NN50.
+
 ## What happens under the hood
 
 1. Morphology detection finds R/P, segments cycles, and fits symmetric Gaussians.

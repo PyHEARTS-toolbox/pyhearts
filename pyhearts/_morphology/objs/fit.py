@@ -13,7 +13,7 @@ from hashlib import sha256
 import subprocess
 
 from pyhearts._morphology.config import ProcessCycleConfig   
-from pyhearts._morphology.feature import calc_hrv_metrics
+from pyhearts._morphology.feature import calc_hrv_metrics, rr_intervals_ms_from_r_peaks
 from pyhearts._morphology.processing import (
     epoch_ecg,
     initialize_output_dict,
@@ -72,6 +72,8 @@ class PyHEARTS:
         self.previous_gauss_features: Optional[dict] = None
         self.sig_corrected_dict: dict = {}
         self.hrv_metrics: dict = {}
+        self.r_peak_indices: Optional[np.ndarray] = None
+        self.rr_intervals_ms: Optional[np.ndarray] = None
     ######     
     # ===== Repro/metadata helpers (private) =====
     def _git_info(self) -> dict:
@@ -313,6 +315,8 @@ class PyHEARTS:
         self.sig_corrected_dict = {}
         self.output_dict = None
         self.hrv_metrics = {}
+        self.r_peak_indices = None
+        self.rr_intervals_ms = None
 
         try:
             filtered_r_peaks = r_peak_detection(
@@ -456,32 +460,40 @@ class PyHEARTS:
 
     def compute_hrv_metrics(self):
         """
-        Compute heart rate variability (HRV) metrics from R-R intervals.
-    
-        Uses `calc_hrv_metrics` to compute standard HRV measures, including:
-        - Average heart rate (bpm)
-        - SDNN: standard deviation of NN intervals
-        - RMSSD: root mean square of successive differences
-        - NN50: count of interval pairs differing by >50 ms
-    
-        Returns
-        -------
-        None
-            Updates `self.hrv_metrics` with computed values, or an empty dict if computation fails.
+        Compute heart rate variability (HRV) from detected R peaks.
+
+        RR intervals are formed from ``self.r_peak_indices`` (pre-epoch /
+        pre-morphology R detection), physiology-gated with
+        ``cfg.rr_bounds_ms``. This does **not** use per-cycle
+        ``RR_interval_ms`` from retained morphology beats, so epoch quality
+        filtering and Gaussian warm-start do not bias HRV.
+
+        Requires at least 60 valid RR intervals. Updates ``self.hrv_metrics``
+        with mean heart rate (bpm), SDNN, RMSSD, and NN50, plus provenance
+        fields ``rr_source``, ``n_r_peaks``, and ``n_rr_intervals``.
         """
         try:
-            if self.output_dict is None or "RR_interval_ms" not in self.output_dict:
-                raise ValueError("RR intervals are missing in output_dict. Cannot compute HRV metrics.")
+            if self.r_peak_indices is None or len(self.r_peak_indices) < 2:
+                raise ValueError(
+                    "R-peak indices are missing. Run analyze_ecg (or R detection) before HRV."
+                )
 
-            rr_intervals = np.array(self.output_dict["RR_interval_ms"])
-            clean_rr_intervals = rr_intervals[~np.isnan(rr_intervals)]
+            rr_bounds = getattr(self.cfg, "rr_bounds_ms", None)
+            clean_rr_intervals = rr_intervals_ms_from_r_peaks(
+                self.r_peak_indices,
+                float(self.sampling_rate),
+                rr_bounds_ms=rr_bounds,
+            )
             self.rr_intervals_ms = clean_rr_intervals
 
-            if len(clean_rr_intervals) < 2:
+            if clean_rr_intervals.size < 2:
                 raise ValueError("Insufficient valid R-R intervals for HRV computation.")
 
-            if len(clean_rr_intervals) < 60:
-                logging.info(f"Skipping HRV computation — only {len(clean_rr_intervals)} RR intervals.")
+            if clean_rr_intervals.size < 60:
+                logging.info(
+                    "Skipping HRV computation — only %s RR intervals from R peaks.",
+                    clean_rr_intervals.size,
+                )
                 self.hrv_metrics = {}
                 return
 
@@ -491,6 +503,9 @@ class PyHEARTS:
                 "sdnn": sdnn,
                 "rmssd": rmssd,
                 "nn50": nn50,
+                "rr_source": "r_peaks",
+                "n_r_peaks": int(np.asarray(self.r_peak_indices).size),
+                "n_rr_intervals": int(clean_rr_intervals.size),
             }
 
         except ValueError as ve:

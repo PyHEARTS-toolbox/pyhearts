@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- `compute_hrv_metrics` now builds RR intervals from detected R peaks
+  (pre-epoch / pre-morphology), physiology-gated by `rr_bounds_ms`, instead of
+  using retained-cycle `RR_interval_ms`. Morphology feature-table RR is unchanged.
+
 ## [1.0.0] - 2026-07-22
 
 First public release of the PyHEARTS toolbox.
