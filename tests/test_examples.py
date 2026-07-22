@@ -26,7 +26,10 @@ def test_notebook_code_cells_compile(notebook_path):
 
 
 @pytest.mark.parametrize("notebook_path", NOTEBOOKS)
-def test_notebooks_use_hybrid_api(notebook_path):
+def test_notebooks_use_public_species_api(notebook_path):
     source = notebook_path.read_text()
     assert 'species=\\"human\\"' in source
     assert "sensitivity=" not in source
+    assert "pyhearts._morphology" not in source
+    assert "pyhearts.core.hybrid" not in source
+    assert "hybrid_mod" not in source

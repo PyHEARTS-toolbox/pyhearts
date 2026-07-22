@@ -1,42 +1,15 @@
-"""Processing functions for ECG signal analysis."""
+"""Record-level delineation and record-T helpers used by the public analyzer."""
 
-from .bounds import calc_bounds
-from .detrend import detrend_signal
-from .epoch import epoch_ecg
-from .gaussian import compute_gauss_std, gaussian_function
-from .initdict import initialize_output_dict
-from .peaks import find_peaks
-from .preprocess import preprocess_ecg
-from .processcycle import process_cycle
-from .rpeak import r_peak_detection
-from .snrgate import gate_by_local_mad
-from .validation import (
-    log_peak_result,
-    validate_peaks,
-    validate_peak_temporal_order,
-    validate_intervals_physiological,
-    validate_cycle_physiology,
+from .cycle_feature_refresh import refresh_cycles_after_timing_update
+from .delineation_signal import prepare_record_delineation_signal
+from .record_delineation import (
+    build_record_beat_template,
+    delineate_record_template,
 )
-from .waveletoffset import calc_wavelet_dynamic_offset
-from .quality import assess_signal_quality
 
 __all__ = [
-    "assess_signal_quality",
-    "calc_bounds",
-    "calc_wavelet_dynamic_offset",
-    "compute_gauss_std",
-    "detrend_signal",
-    "epoch_ecg",
-    "find_peaks",
-    "gate_by_local_mad",
-    "gaussian_function",
-    "initialize_output_dict",
-    "log_peak_result",
-    "preprocess_ecg",
-    "process_cycle",
-    "r_peak_detection",
-    "validate_peaks",
-    "validate_peak_temporal_order",
-    "validate_intervals_physiological",
-    "validate_cycle_physiology",
+    "build_record_beat_template",
+    "delineate_record_template",
+    "prepare_record_delineation_signal",
+    "refresh_cycles_after_timing_update",
 ]

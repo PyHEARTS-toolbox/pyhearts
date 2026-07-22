@@ -1,16 +1,24 @@
 """
 PyHEARTS: Python Heart Evaluation and Analysis for Rhythm and Temporal Shape.
 
-Beat-by-beat ECG waveform morphology mapping for interpretable machine learning and AI.
+Beat-by-beat ECG morphology analysis for research use. The main entry point is
+:class:`~pyhearts.core.analyzer.PyHEARTS`.
+
+Typical workflow
+----------------
+1. ``analyzer = PyHEARTS(sampling_rate=..., species="human")``
+2. Optionally preprocess with ``analyzer.preprocess_signal(...)``
+3. ``features, cycles = analyzer.analyze_ecg(ecg)``
+4. Optionally ``analyzer.save_output(file_id, results_dir)``
+
+See the package README and ``docs/PRESETS.md`` for install and preset details.
 """
 
 # Submodules
-from . import feature, fitmetrics, io, plots, processing
-from ._legacy2025 import ProcessCycleConfig as CoreProcessCycleConfig
+from . import feature, io, plots, processing
 
 # Core classes
-from .config import ProcessCycleConfig
-from .core.hybrid import PyHEARTS
+from .core.analyzer import PyHEARTS
 
 # I/O helpers
 from .io import (
@@ -35,8 +43,6 @@ __all__ = [
     "__version__",
     # Core
     "PyHEARTS",
-    "ProcessCycleConfig",
-    "CoreProcessCycleConfig",
     # I/O
     "load_monitor_csv",
     "load_wfdb_signal",
@@ -46,7 +52,6 @@ __all__ = [
     "generate_ecg_signal",
     # Submodules
     "feature",
-    "fitmetrics",
     "io",
     "plots",
     "processing",

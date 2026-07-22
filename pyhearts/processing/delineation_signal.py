@@ -2,8 +2,8 @@
 Phase B: signal conditioning for P/T delineation.
 
 - Two-stage median baseline removal (windows fs and 2×fs).
-- Savitzky–Golay smoothing on search segments (shape-preserving; off for Rahul STPQ).
-- Optional delineation bandpass (legacy; Rahul STPQ T search uses median baseline only).
+- Savitzky–Golay smoothing on search segments (shape-preserving; off for record-T search).
+- Optional delineation bandpass (optional; record-level T search uses median baseline only).
   R detection bandpass is configured separately via ``rpeak_highpass_hz`` / ``rpeak_lowpass_hz``.
 """
 
@@ -72,7 +72,7 @@ def prepare_record_delineation_signal(
     sampling_rate: float,
     cfg: ProcessCycleConfig,
 ) -> np.ndarray:
-    """Full-record signal for P/T search (median baseline; optional legacy bandpass)."""
+    """Full-record signal for P/T search (median baseline; optional bandpass)."""
     if cfg.delineation_baseline_method == "median_record":
         w1, w2 = cfg.delineation_median_baseline_windows_s
         x = median_baseline_removal(ecg, sampling_rate, w1, w2)

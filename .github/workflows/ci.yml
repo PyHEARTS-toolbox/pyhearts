@@ -57,7 +57,7 @@ jobs:
         run: |
           python -m pip install dist/*.whl
           cd /tmp
-          python -c "import pyhearts; assert pyhearts.__version__ == '2.0.0'"
+          python -c "import pyhearts; assert pyhearts.__version__ == '1.0.0'"
 
       - name: Upload distributions
         uses: actions/upload-artifact@v4

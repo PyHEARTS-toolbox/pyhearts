@@ -21,7 +21,7 @@ class ProcessCycleConfig:
     #
     # BREAKING CHANGE NOTE:
     # Historically PyHEARTS exposed multiple R-peak detection algorithms via
-    # `rpeak_method` (e.g., pan_tompkins, bandpass_energy). Those legacy paths
+    # `rpeak_method` (e.g., pan_tompkins, bandpass_energy). Those alternate paths
     # have been removed to reduce maintenance surface area. PyHEARTS now uses
     # the unified `pyhearts.processing.r_peak_detection`.
     rpeak_prominence_multiplier: float = 2.5          # σ multiplier (lowered from 3.0 for better recall)
@@ -131,12 +131,12 @@ class ProcessCycleConfig:
     record_delineation_t_search_end_ms: float = 450.0
     record_delineation_refresh_features: bool = True
     record_delineation_refresh_shape: bool = True
-    # Sprint 1: map P/T on every R (STPQ + template fallback when search misses)
+    # Sprint 1: map P/T on every R (record-T + template fallback when search misses)
     record_delineation_map_all_beats: bool = False
     record_delineation_map_p_even_if_finite: bool = False
     record_delineation_map_t_even_if_finite: bool = False
     record_delineation_template_fallback: bool = True
-    # Rahul-first: STPQ seed before process_cycle (skip post-pass overwrite).
+    # Rahul-first: record-T seed before process_cycle (skip post-pass overwrite).
     record_delineation_before_cycles: bool = False
     # Phase 1: project S→Q template windows; per-cycle P/T search inside bounds only.
     record_template_prior_windows: bool = False
@@ -181,7 +181,7 @@ class ProcessCycleConfig:
     record_inverted_dzc_rescue_match_ms: float = 12.0
     # Never uses per-cycle derivative P/T fallback.
     record_fiducial_miss_policy: str = "template_fallback_then_nan"
-    # Sprint 2: adaptive local refine after STPQ/template guess
+    # Sprint 2: adaptive local refine after record-T/template guess
     record_delineation_refine_always: bool = False
     record_delineation_refine_adaptive: bool = False
     record_delineation_refine_rt_frac: float = 0.05
@@ -189,12 +189,12 @@ class ProcessCycleConfig:
     record_refine_p_operator: str = "derivative_apex"
     record_refine_t_operator: str = "derivative_apex"
     record_refine_t_lowpass_hz: float = 40.0
-    # Record local refine signal: STPQ guess unchanged; only apex search substrate.
+    # Record local refine signal: record-T guess unchanged; only apex search substrate.
     # "delineation" = median-baseline delineation trace (SG optional via p_t_search_savgol).
     # "epoch" = per-cycle ``signal_y`` from epoching (analyzed input segment).
     # "clinical" = ``clinical_ecg`` slice when provided (export: raw WFDB crop).
     record_delineation_refine_signal: str = "delineation"
-    # Step A diagnostic: stash STPQ guess / refine / S–Q anchors per cycle (export only).
+    # Step A diagnostic: stash record-T guess / refine / S–Q anchors per cycle (export only).
     record_delineation_t_timing_audit: bool = False
     # Sprint 3: clinical second-pass on raw/epoch trace
     record_clinical_verify: bool = False
@@ -207,10 +207,10 @@ class ProcessCycleConfig:
     clinical_verify_refresh_features: bool = True
     shape_at_timing_index_signal: str = "delineation"
 
-    # ----- Phase B: P/T delineation signal & STPQ template -----
+    # ----- Phase B: P/T delineation signal & record-T template -----
     delineation_baseline_method: str = "linear_epoch"
     delineation_median_baseline_windows_s: Tuple[float, float] = (1.0, 2.0)
-    # Optional light bandpass on record delineation signal (legacy; off for Rahul STPQ T path).
+    # Optional light bandpass on record delineation signal (optional; off for the record-level T path).
     delineation_bandpass: bool = False
     delineation_bandpass_low_hz: float = 5.0
     delineation_bandpass_high_hz: float = 20.0
@@ -221,13 +221,13 @@ class ProcessCycleConfig:
     record_template_anchor: str = "r_centered"
     record_template_max_duration_s: float = 60.0
     record_template_aggregate: str = "median"  # "median" | "mean" (Rahul uses mean)
-    record_delineation_stpq_search: bool = True  # S→Q anchored w1/w2 + template thresholds
-    # "derivative": per-cycle P/T in process_cycle; "record_only": record STPQ pass only
+    record_delineation_t_search: bool = True  # S→Q anchored w1/w2 + template thresholds
+    # "derivative": per-cycle P/T in process_cycle; "record_only": record record-T pass only
     p_t_detection_method: str = "derivative"
-    p_t_threshold_mode: str = "legacy"
+    p_t_threshold_mode: str = "fixed"
     record_template_t_r_amplitude_ratio: float = 0.5
     record_template_fixed_p_mv: float = 0.1
-    # STPQ template Tⱼ: dominant early positive peak vs isoelectric fallback
+    # record-T template Tⱼ: dominant early positive peak vs isoelectric fallback
     record_template_t_landmark_sq_frac: Tuple[float, float] = (0.15, 0.40)
     # Rising-edge fallback only: scan onset from this S→Q fraction (shared peak gate stays at 15%).
     record_template_t_rising_edge_lo_frac: float = 0.08
@@ -238,15 +238,15 @@ class ProcessCycleConfig:
     record_template_t_landmark_inverted_peak: bool = True
     # T-threshold normalization: max positive excursion in this S→Q fraction (not global |deflection|).
     record_template_t_amplitude_norm_sq_frac: Tuple[float, float] = (0.15, 0.80)
-    # Optional fixed S→Q window for inverted_t vs normal morphology (None = legacy t_j→mid(T,P)).
+    # Optional fixed S→Q window for inverted_t vs normal morphology (None = t_j→mid(T,P)).
     record_template_t_morphology_sq_frac: Optional[Tuple[float, float]] = None
     # Biphasic +−: template classify (morphology tag + pos/neg landmarks on median beat)
     record_template_detect_biphasic_positive_negative: bool = False
-    # Ablation only: override Tⱼ / STPQ search / projection (off in production guardrail path)
+    # Ablation only: override Tⱼ / record-T search / projection (off in production guardrail path)
     record_biphasic_pm_lobe_search: bool = False
-    record_stpq_biphasic_pm_early_margin_ms: float = 35.0
-    record_stpq_biphasic_pm_sep_before_neg_ms: float = 50.0
-    record_stpq_biphasic_pm_late_cap_ms: float = 120.0
+    record_t_biphasic_pm_early_margin_ms: float = 35.0
+    record_t_biphasic_pm_sep_before_neg_ms: float = 50.0
+    record_t_biphasic_pm_late_cap_ms: float = 120.0
     # Guardrail only: if T is >margin_ms before template positive apex, clamp to apex (no late shift)
     record_biphasic_pm_early_t_guardrail: bool = False
     record_biphasic_pm_early_guardrail_margin_ms: float = 10.0
@@ -254,58 +254,58 @@ class ProcessCycleConfig:
     record_biphasic_pm_early_guardrail_beat_order_check: bool = False
     record_biphasic_pm_early_guardrail_min_prominence_frac: float = 0.0
     # Ablation: post-positive-peak downslope dz vs template-guided apex (off by default)
-    record_stpq_post_apex_dz_preference: bool = False
-    record_stpq_post_apex_dz_min_late_ms: float = 10.0
-    record_stpq_post_apex_dz_max_late_ms: float = 80.0
-    record_stpq_post_apex_dz_rt_tolerance_ms: float = 45.0
-    record_stpq_post_apex_dz_pos_early_ms: float = 8.0
-    record_stpq_post_apex_dz_min_beat_frac: float = 0.20
-    record_stpq_post_apex_dz_max_beat_frac: Optional[float] = 0.38
+    record_t_post_apex_dz_preference: bool = False
+    record_t_post_apex_dz_min_late_ms: float = 10.0
+    record_t_post_apex_dz_max_late_ms: float = 80.0
+    record_t_post_apex_dz_rt_tolerance_ms: float = 45.0
+    record_t_post_apex_dz_pos_early_ms: float = 8.0
+    record_t_post_apex_dz_min_beat_frac: float = 0.20
+    record_t_post_apex_dz_max_beat_frac: Optional[float] = 0.38
     record_qs_search_window_ms: float = 150.0
     record_s_search_after_r_ms: float = 200.0  # S trough can lag R in wide QRS
     record_q_search_before_r_ms: float = 150.0
-    record_stpq_t_max_rt_ms: float = 550.0  # physiological cap on T search / placement from R
-    # STPQ P search: R-anchored PR window (more robust than S→Q fraction w2)
-    record_stpq_p_r_anchor: bool = True
-    record_stpq_p_r_anchor_mode: str = "current_r"  # current_r (q1c) | next_r (Rahul S→Q)
-    record_stpq_p_pr_max_ms: float = 250.0  # earliest P: R_anchor − this (max PR interval)
-    record_stpq_p_pr_min_ms: float = 80.0  # latest P: R_anchor − this (min PR interval)
-    record_stpq_p_template_guided: bool = True  # fallback / reconcile via template PR center
-    record_stpq_p_template_guided_half_window_ms: float = 80.0  # ± search around projected P
-    record_stpq_p_template_guided_reconcile_ms: float = 50.0  # re-pick if threshold apex farther than this
-    record_stpq_p_template_guided_distance_penalty: float = 0.002  # per-sample score penalty vs projected P
-    record_stpq_p_pr_center_ms: float = 180.0  # projected P before R (current_r); q1c typical PR
+    record_t_max_rt_ms: float = 550.0  # physiological cap on T search / placement from R
+    # record-T P search: R-anchored PR window (more robust than S→Q fraction w2)
+    record_t_p_r_anchor: bool = True
+    record_t_p_r_anchor_mode: str = "current_r"  # current_r (q1c) | next_r (Rahul S→Q)
+    record_t_p_pr_max_ms: float = 250.0  # earliest P: R_anchor − this (max PR interval)
+    record_t_p_pr_min_ms: float = 80.0  # latest P: R_anchor − this (min PR interval)
+    record_t_p_template_guided: bool = True  # fallback / reconcile via template PR center
+    record_t_p_template_guided_half_window_ms: float = 80.0  # ± search around projected P
+    record_t_p_template_guided_reconcile_ms: float = 50.0  # re-pick if threshold apex farther than this
+    record_t_p_template_guided_distance_penalty: float = 0.002  # per-sample score penalty vs projected P
+    record_t_p_pr_center_ms: float = 180.0  # projected P before R (current_r); q1c typical PR
     # Mode 1 per-beat T: cap w1 at template Tⱼ (+ margin) and template-guided apex in w1
-    record_stpq_t_w1_end_mode: str = "template_tj_margin"  # mid_tp | template_tj_margin
-    record_stpq_t_w1_post_tj_frac: float = 0.08  # w1 hi = t_j + frac*(mid(T,P)-t_j)
+    record_t_w1_end_mode: str = "template_tj_margin"  # mid_tp | template_tj_margin
+    record_t_w1_post_tj_frac: float = 0.08  # w1 hi = t_j + frac*(mid(T,P)-t_j)
     # When formula w1_hi (S→Q fraction) is below min, extend to min capped at p_j − margin (0 = off)
-    record_stpq_w1_hi_min_sq_frac: float = 0.0
-    record_stpq_w1_hi_pj_margin_sq_frac: float = 0.15
-    record_stpq_t_apex_mode: str = "mode1"  # mode1 = template-guided primary; threshold = legacy
-    record_stpq_t_project_from: str = "landmark"  # landmark | delineated | blend
-    record_stpq_t_landmark_blend_frac: float = 0.35  # blend: land + frac*(offset-land)
-    record_stpq_t_mode1_max_dist_ms: float = 22.0  # mode1: ignore extrema farther than this
-    record_stpq_t_template_guided: bool = True
-    record_stpq_t_template_guided_half_window_ms: float = 35.0
-    record_stpq_t_template_guided_reconcile_ms: float = 40.0
-    record_stpq_t_template_guided_distance_penalty: float = 0.006
+    record_t_w1_hi_min_sq_frac: float = 0.0
+    record_t_w1_hi_pj_margin_sq_frac: float = 0.15
+    record_t_apex_mode: str = "mode1"  # mode1 = template-guided primary; threshold = amplitude path
+    record_t_project_from: str = "landmark"  # landmark | delineated | blend
+    record_t_landmark_blend_frac: float = 0.35  # blend: land + frac*(offset-land)
+    record_t_mode1_max_dist_ms: float = 22.0  # mode1: ignore extrema farther than this
+    record_t_template_guided: bool = True
+    record_t_template_guided_half_window_ms: float = 35.0
+    record_t_template_guided_reconcile_ms: float = 40.0
+    record_t_template_guided_distance_penalty: float = 0.006
     # plateau_apex + inverted_t: forward argmin trough search from projected t_j (ms)
-    record_stpq_t_plateau_apex_forward_ms: float = 40.0
-    record_stpq_t_mode1_min_amp_frac: float = 0.20  # nearest-apex pool: |amp| >= frac * window max
+    record_t_plateau_apex_forward_ms: float = 40.0
+    record_t_mode1_min_amp_frac: float = 0.20  # nearest-apex pool: |amp| >= frac * window max
     # early_peak landmark: narrow w1 / delineation so late-lobe threshold search cannot dominate
-    record_stpq_t_early_peak_w1_post_tj_frac: float = 0.03
-    record_stpq_t_early_peak_delineation_post_tj_frac: float = 0.04
-    record_stpq_t_early_peak_rising_edge_frac: float = 0.35  # onset threshold vs window peak
-    record_stpq_t_early_peak_max_late_from_center_ms: float = 15.0  # cap STPQ pick vs projected Tⱼ
-    # When STPQ guess exceeds this distance from per-cycle T, keep per-cycle (requires t_wave_use_record_prior)
-    record_stpq_t_per_cycle_guardrail_ms: float = 20.0
-    # Sprint 4: QRS-energy wavelet coarse P/T priors (STPQ/template expected offsets)
+    record_t_early_peak_w1_post_tj_frac: float = 0.03
+    record_t_early_peak_delineation_post_tj_frac: float = 0.04
+    record_t_early_peak_rising_edge_frac: float = 0.35  # onset threshold vs window peak
+    record_t_early_peak_max_late_from_center_ms: float = 15.0  # cap record-T pick vs projected Tⱼ
+    # When record-T guess exceeds this distance from per-cycle T, keep per-cycle (requires t_wave_use_record_prior)
+    record_t_per_cycle_guardrail_ms: float = 20.0
+    # Sprint 4: QRS-energy wavelet coarse P/T priors (record-T/template expected offsets)
     record_wavelet_pt_prior: bool = False
     record_wavelet_r_std_ms: float = 20.0
     record_wavelet_t_after_s_ms: float = 20.0
     record_wavelet_p_before_q_ms: float = 20.0
-    record_stpq_use_savgol: bool = True  # False = STPQ apex search on raw delineation segment
-    record_delineation_fill_missing_t: bool = False  # post-pass STPQ/template for NaN T
+    record_t_use_savgol: bool = True  # False = record-T apex search on raw delineation segment
+    record_delineation_fill_missing_t: bool = False  # post-pass record-T/template for NaN T
     clinical_verify_t_conditional: bool = False  # T clinical only if RT disputed vs record prior
     clinical_verify_t_dispute_mad_mult: float = 2.5
     clinical_verify_t_dispute_min_ms: float = 50.0
@@ -313,7 +313,7 @@ class ProcessCycleConfig:
     # ----- Per-record routing (record delineation vs per-cycle T) -----
     # Optional path to a JSON routing table:
     # { "records": [ { "record": "sel104", "route": "per_cycle_t" }, ... ] }
-    record_stpq_routing_table: Optional[str] = None
+    record_t_routing_table: Optional[str] = None
 
     # ----- Wavelet-based dynamic offsets / R context -----
     wavelet_base_offset_ms: int = 1      # min dynamic offset (ms) around QRS
@@ -454,10 +454,10 @@ class ProcessCycleConfig:
         if self.r_kurtosis_reference_mode not in (
             "sharpest_peak",
             "local_rr_neighbor",
-            "legacy_median",
+            "upper_median",
         ):
             raise ValueError(
-                "r_kurtosis_reference_mode must be sharpest_peak, local_rr_neighbor, or legacy_median"
+                "r_kurtosis_reference_mode must be sharpest_peak, local_rr_neighbor, or upper_median"
             )
         if not (0.0 < self.r_kurtosis_fraction_of_sharpest <= 1.0):
             raise ValueError("r_kurtosis_fraction_of_sharpest in (0, 1]")
@@ -586,8 +586,8 @@ class ProcessCycleConfig:
             raise ValueError("record_template_aggregate must be 'median' or 'mean'")
         if self.p_t_detection_method not in ("derivative", "record_only"):
             raise ValueError("p_t_detection_method must be 'derivative' or 'record_only'")
-        if self.p_t_threshold_mode not in ("legacy", "template"):
-            raise ValueError("p_t_threshold_mode must be 'legacy' or 'template'")
+        if self.p_t_threshold_mode not in ("fixed", "template"):
+            raise ValueError("p_t_threshold_mode must be 'fixed' or 'template'")
         if self.p_t_detection_method == "record_only" and not self.record_delineation:
             raise ValueError("p_t_detection_method='record_only' requires record_delineation=True")
         if self.record_fiducial_miss_policy not in (
@@ -618,30 +618,30 @@ class ProcessCycleConfig:
             raise ValueError("record_template_t_landmark_min_peak_frac in (0, 1]")
         if not (0.0 <= self.record_template_t_landmark_min_prominence_frac <= 1.0):
             raise ValueError("record_template_t_landmark_min_prominence_frac in [0, 1]")
-        if self.record_stpq_t_w1_end_mode not in ("mid_tp", "template_tj_margin"):
-            raise ValueError("record_stpq_t_w1_end_mode must be mid_tp or template_tj_margin")
-        if not (0.0 <= self.record_stpq_t_w1_post_tj_frac <= 1.0):
-            raise ValueError("record_stpq_t_w1_post_tj_frac in [0, 1]")
-        if not (0.0 <= self.record_stpq_w1_hi_min_sq_frac <= 1.0):
-            raise ValueError("record_stpq_w1_hi_min_sq_frac in [0, 1]")
-        if not (0.0 <= self.record_stpq_w1_hi_pj_margin_sq_frac <= 1.0):
-            raise ValueError("record_stpq_w1_hi_pj_margin_sq_frac in [0, 1]")
-        if self.record_stpq_t_apex_mode not in ("mode1", "threshold"):
-            raise ValueError("record_stpq_t_apex_mode must be mode1 or threshold")
-        if self.record_stpq_t_project_from not in ("landmark", "delineated", "blend"):
-            raise ValueError("record_stpq_t_project_from must be landmark, delineated, or blend")
-        if not (0.0 <= self.record_stpq_t_landmark_blend_frac <= 1.0):
-            raise ValueError("record_stpq_t_landmark_blend_frac in [0, 1]")
-        if self.record_stpq_t_mode1_max_dist_ms < 0:
-            raise ValueError("record_stpq_t_mode1_max_dist_ms must be >= 0")
-        if self.record_stpq_t_template_guided_half_window_ms <= 0:
-            raise ValueError("record_stpq_t_template_guided_half_window_ms > 0")
-        if self.record_stpq_t_template_guided_reconcile_ms <= 0:
-            raise ValueError("record_stpq_t_template_guided_reconcile_ms > 0")
-        if self.record_stpq_t_template_guided_distance_penalty < 0:
-            raise ValueError("record_stpq_t_template_guided_distance_penalty >= 0")
-        if self.record_stpq_t_plateau_apex_forward_ms <= 0:
-            raise ValueError("record_stpq_t_plateau_apex_forward_ms > 0")
+        if self.record_t_w1_end_mode not in ("mid_tp", "template_tj_margin"):
+            raise ValueError("record_t_w1_end_mode must be mid_tp or template_tj_margin")
+        if not (0.0 <= self.record_t_w1_post_tj_frac <= 1.0):
+            raise ValueError("record_t_w1_post_tj_frac in [0, 1]")
+        if not (0.0 <= self.record_t_w1_hi_min_sq_frac <= 1.0):
+            raise ValueError("record_t_w1_hi_min_sq_frac in [0, 1]")
+        if not (0.0 <= self.record_t_w1_hi_pj_margin_sq_frac <= 1.0):
+            raise ValueError("record_t_w1_hi_pj_margin_sq_frac in [0, 1]")
+        if self.record_t_apex_mode not in ("mode1", "threshold"):
+            raise ValueError("record_t_apex_mode must be mode1 or threshold")
+        if self.record_t_project_from not in ("landmark", "delineated", "blend"):
+            raise ValueError("record_t_project_from must be landmark, delineated, or blend")
+        if not (0.0 <= self.record_t_landmark_blend_frac <= 1.0):
+            raise ValueError("record_t_landmark_blend_frac in [0, 1]")
+        if self.record_t_mode1_max_dist_ms < 0:
+            raise ValueError("record_t_mode1_max_dist_ms must be >= 0")
+        if self.record_t_template_guided_half_window_ms <= 0:
+            raise ValueError("record_t_template_guided_half_window_ms > 0")
+        if self.record_t_template_guided_reconcile_ms <= 0:
+            raise ValueError("record_t_template_guided_reconcile_ms > 0")
+        if self.record_t_template_guided_distance_penalty < 0:
+            raise ValueError("record_t_template_guided_distance_penalty >= 0")
+        if self.record_t_plateau_apex_forward_ms <= 0:
+            raise ValueError("record_t_plateau_apex_forward_ms > 0")
         an_lo, an_hi = self.record_template_t_amplitude_norm_sq_frac
         if not (0.0 <= an_lo < an_hi <= 1.0):
             raise ValueError("record_template_t_amplitude_norm_sq_frac must satisfy 0 <= lo < hi <= 1")
@@ -651,22 +651,22 @@ class ProcessCycleConfig:
                 raise ValueError(
                     "record_template_t_morphology_sq_frac must satisfy 0 <= lo < hi <= 1"
                 )
-        if self.record_stpq_t_max_rt_ms <= 0:
-            raise ValueError("record_stpq_t_max_rt_ms > 0")
-        if self.record_stpq_p_pr_min_ms <= 0:
-            raise ValueError("record_stpq_p_pr_min_ms > 0")
-        if self.record_stpq_p_pr_max_ms <= self.record_stpq_p_pr_min_ms:
-            raise ValueError("record_stpq_p_pr_max_ms > record_stpq_p_pr_min_ms")
-        if self.record_stpq_p_r_anchor_mode not in ("current_r", "next_r"):
-            raise ValueError("record_stpq_p_r_anchor_mode must be 'current_r' or 'next_r'")
-        if self.record_stpq_p_template_guided_half_window_ms <= 0:
-            raise ValueError("record_stpq_p_template_guided_half_window_ms > 0")
-        if self.record_stpq_p_template_guided_reconcile_ms <= 0:
-            raise ValueError("record_stpq_p_template_guided_reconcile_ms > 0")
-        if self.record_stpq_p_template_guided_distance_penalty < 0:
-            raise ValueError("record_stpq_p_template_guided_distance_penalty >= 0")
-        if not (self.record_stpq_p_pr_min_ms <= self.record_stpq_p_pr_center_ms <= self.record_stpq_p_pr_max_ms):
-            raise ValueError("record_stpq_p_pr_center_ms must lie within [pr_min, pr_max]")
+        if self.record_t_max_rt_ms <= 0:
+            raise ValueError("record_t_max_rt_ms > 0")
+        if self.record_t_p_pr_min_ms <= 0:
+            raise ValueError("record_t_p_pr_min_ms > 0")
+        if self.record_t_p_pr_max_ms <= self.record_t_p_pr_min_ms:
+            raise ValueError("record_t_p_pr_max_ms > record_t_p_pr_min_ms")
+        if self.record_t_p_r_anchor_mode not in ("current_r", "next_r"):
+            raise ValueError("record_t_p_r_anchor_mode must be 'current_r' or 'next_r'")
+        if self.record_t_p_template_guided_half_window_ms <= 0:
+            raise ValueError("record_t_p_template_guided_half_window_ms > 0")
+        if self.record_t_p_template_guided_reconcile_ms <= 0:
+            raise ValueError("record_t_p_template_guided_reconcile_ms > 0")
+        if self.record_t_p_template_guided_distance_penalty < 0:
+            raise ValueError("record_t_p_template_guided_distance_penalty >= 0")
+        if not (self.record_t_p_pr_min_ms <= self.record_t_p_pr_center_ms <= self.record_t_p_pr_max_ms):
+            raise ValueError("record_t_p_pr_center_ms must lie within [pr_min, pr_max]")
         if self.record_qs_search_window_ms <= 0:
             raise ValueError("record_qs_search_window_ms > 0")
         if self.record_s_search_after_r_ms <= 0:
@@ -825,11 +825,10 @@ class ProcessCycleConfig:
     @classmethod
     def for_human(cls) -> "ProcessCycleConfig":
         """
-        Legacy human baseline (v2.3): derivative R + per-cycle P/T only.
+        Human morphology preset without record-level record-T (per-cycle P/T only).
 
-        Not the default for :class:`~pyhearts.core.fit.PyHEARTS` — use
-        :meth:`for_human_unified` for production. Kept as the R/P/T tuning base
-        and for regression benchmarks (``human_derivative``).
+        The public analyzer uses :meth:`for_human_unified` for its record-T config.
+        This preset remains useful as a morphology-only baseline.
 
         R detection (Phase A):
         - R-peak bandpass 5–20 Hz
@@ -882,7 +881,7 @@ class ProcessCycleConfig:
             delineation_baseline_method="linear_epoch",
             p_t_search_savgol=True,
             record_template_anchor="r_centered",
-            p_t_threshold_mode="legacy",
+            p_t_threshold_mode="fixed",
             r_post_detection_refrac_enabled=True,
             r_post_detection_refrac_ms=400.0,
             r_prp_spacing_enabled=True,
@@ -907,7 +906,7 @@ class ProcessCycleConfig:
         """
         Production human_unified baseline.
 
-        Derivative R + per-cycle P + record STPQ T with threshold apex on delineated
+        Derivative R + per-cycle P + record record-level T with threshold apex on delineated
         trace, w1 floor (40% S→Q), fixed-window morphology classification,
         template-guided reconcile, and derivative_apex local refine.
         """
@@ -918,31 +917,31 @@ class ProcessCycleConfig:
             p_t_detection_method="derivative",
             p_use_derivative_validated_method=True,
             p_t_search_savgol=False,
-            record_stpq_use_savgol=False,
+            record_t_use_savgol=False,
             delineation_bandpass=False,
             record_delineation=True,
             record_template_anchor="s_to_q",
             record_template_aggregate="mean",
             record_template_max_duration_s=60.0,
             p_t_threshold_mode="template",
-            record_delineation_stpq_search=True,
+            record_delineation_t_search=True,
             record_delineation_replace_p=True,
             record_delineation_replace_t=True,
             record_delineation_overwrite_existing_p=False,
             record_delineation_overwrite_existing_t=True,
             record_template_t_amplitude_norm_sq_frac=(0.15, 0.80),
             record_template_t_morphology_sq_frac=(0.20, 0.60),
-            record_stpq_t_max_rt_ms=550.0,
-            record_stpq_t_w1_end_mode="template_tj_margin",
-            record_stpq_t_w1_post_tj_frac=0.15,
-            record_stpq_w1_hi_min_sq_frac=0.40,
-            record_stpq_w1_hi_pj_margin_sq_frac=0.15,
-            record_stpq_t_apex_mode="threshold",
-            record_stpq_t_project_from="delineated",
-            record_stpq_t_template_guided=True,
-            record_stpq_t_template_guided_half_window_ms=60.0,
-            record_stpq_t_template_guided_reconcile_ms=40.0,
-            record_stpq_t_template_guided_distance_penalty=0.002,
+            record_t_max_rt_ms=550.0,
+            record_t_w1_end_mode="template_tj_margin",
+            record_t_w1_post_tj_frac=0.15,
+            record_t_w1_hi_min_sq_frac=0.40,
+            record_t_w1_hi_pj_margin_sq_frac=0.15,
+            record_t_apex_mode="threshold",
+            record_t_project_from="delineated",
+            record_t_template_guided=True,
+            record_t_template_guided_half_window_ms=60.0,
+            record_t_template_guided_reconcile_ms=40.0,
+            record_t_template_guided_distance_penalty=0.002,
             record_refine_t_operator="derivative_apex",
             record_template_t_landmark_inverted_peak=True,
             record_template_t_landmark_min_prominence_frac=0.10,
@@ -960,7 +959,7 @@ class ProcessCycleConfig:
     @classmethod
     def for_human_unified(cls) -> "ProcessCycleConfig":
         """
-        Production human preset (default): signed-polarity STPQ pipeline.
+        Production human preset (default): signed-polarity record-T pipeline.
 
         Archived experimental fill-missing-T variant: :meth:`for_human_unified_v33a`.
         """
@@ -976,7 +975,7 @@ class ProcessCycleConfig:
         """
         Phase 1 experiment: S→Q template windows constrain per-cycle T search.
 
-        Skips record STPQ overwrite; per-cycle derivative T/P detection runs inside
+        Skips record record-T overwrite; per-cycle derivative T/P detection runs inside
         template-projected w1/w2 bounds (see ``template_prior_windows``).
         """
         return replace(
@@ -1052,7 +1051,7 @@ class ProcessCycleConfig:
         Phase 2: template-prior windows + morphology-routed rescue + optional clustering.
 
         Extends Phase 1 with candidate rescue near template landmarks and k=2 S→Q
-        cluster templates for window projection (priors only, no STPQ overwrite).
+        cluster templates for window projection (priors only, no record-T overwrite).
         """
         return replace(
             cls.for_human_unified_template_prior_phase1(),
@@ -1069,7 +1068,7 @@ class ProcessCycleConfig:
     @classmethod
     def for_human_unified_biphasic_positive_negative_lobe_search(cls) -> "ProcessCycleConfig":
         """
-        Production + biphasic +− template classify and positive-lobe-only STPQ T search.
+        Production + biphasic +− template classify and positive-lobe-only record-level T search.
 
         Ablation preset: does not change routing, R-centered windows, or other morphologies.
         """
@@ -1083,7 +1082,7 @@ class ProcessCycleConfig:
     @classmethod
     def for_human_unified_biphasic_pm_early_guardrail(cls) -> "ProcessCycleConfig":
         """
-        Production + biphasic +− classify-only early-T guardrail (no STPQ override / lobe search).
+        Production + biphasic +− classify-only early-T guardrail (no record-T override / lobe search).
 
         If ``T < first_positive_peak - margin``, clamp ``T`` to the template positive apex.
         Never shifts T later.
@@ -1102,10 +1101,10 @@ class ProcessCycleConfig:
 
     @classmethod
     def for_human_unified_post_apex_dz_preference(cls) -> "ProcessCycleConfig":
-        """Ablation: post_apex_dz vs positive_peak STPQ compare."""
+        """Ablation: post_apex_dz vs positive_peak record-T compare."""
         return replace(
             cls._for_human_unified_base(),
-            record_stpq_post_apex_dz_preference=True,
+            record_t_post_apex_dz_preference=True,
             version="human-unified-post-apex-dz-preference",
         )
 
@@ -1152,7 +1151,7 @@ class ProcessCycleConfig:
             record_clinical_verify=False,
             record_delineation_map_all_beats=False,
             t_wave_use_record_prior=True,
-            record_stpq_t_per_cycle_guardrail_ms=20.0,
+            record_t_per_cycle_guardrail_ms=20.0,
             version="human-unified-fill-only",
         )
 
@@ -1162,7 +1161,7 @@ class ProcessCycleConfig:
         cfg = cls.for_human_unified_v33a()
         return replace(
             cfg,
-            record_stpq_routing_table=(
+            record_t_routing_table=(
                 "benchmark_results/archive/v33a_sprint_20260526/v33a_t_routing_table_20260525.json"
             ),
         )

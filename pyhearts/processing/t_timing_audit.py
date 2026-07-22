@@ -1,4 +1,4 @@
-"""Optional per-cycle audit columns for STPQ T timing diagnosis (Step A)."""
+"""Optional per-cycle audit columns for record-level T timing diagnosis (Step A)."""
 
 from __future__ import annotations
 
@@ -8,10 +8,10 @@ import numpy as np
 
 AUDIT_KEYS = (
     "T_pre_record_center_idx",
-    "T_stpq_guess_center_idx",
+    "T_record_t_guess_center_idx",
     "T_record_refined_center_idx",
-    "stpq_s_anchor_idx",
-    "stpq_q_anchor_idx",
+    "record_t_s_anchor_idx",
+    "record_t_q_anchor_idx",
     "template_rt_offset_ms",
     "t_refine_delta_samples",
 )
@@ -29,7 +29,7 @@ def set_t_timing_audit(
     cycle_idx: int,
     *,
     t_pre: Optional[float] = None,
-    t_stpq_guess: Optional[float] = None,
+    t_record_guess: Optional[float] = None,
     t_refined: Optional[float] = None,
     s_anchor: Optional[float] = None,
     q_anchor: Optional[float] = None,
@@ -40,10 +40,10 @@ def set_t_timing_audit(
         return
     mapping = {
         "T_pre_record_center_idx": t_pre,
-        "T_stpq_guess_center_idx": t_stpq_guess,
+        "T_record_t_guess_center_idx": t_record_guess,
         "T_record_refined_center_idx": t_refined,
-        "stpq_s_anchor_idx": s_anchor,
-        "stpq_q_anchor_idx": q_anchor,
+        "record_t_s_anchor_idx": s_anchor,
+        "record_t_q_anchor_idx": q_anchor,
         "template_rt_offset_ms": template_rt_ms,
         "t_refine_delta_samples": refine_delta_samples,
     }

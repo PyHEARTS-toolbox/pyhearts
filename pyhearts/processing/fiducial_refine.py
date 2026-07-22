@@ -1,7 +1,7 @@
 """
 Local P/T timing refinement operators (Sprint 2).
 
-Used by record delineation and record fiducial smoothing after coarse STPQ/template guesses.
+Used by record delineation and record fiducial smoothing after coarse record-T/template guesses.
 """
 
 from __future__ import annotations

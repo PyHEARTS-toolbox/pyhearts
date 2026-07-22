@@ -58,12 +58,12 @@ def test_fiducial_provenance_sources():
     out = {}
     init_fiducial_provenance(out, 2)
     set_wave_source(out, 0, "P", "per_cycle", confidence="high")
-    set_wave_source(out, 1, "T", "record_stpq", confidence="high")
+    set_wave_source(out, 1, "T", "record_t", confidence="high")
     set_run_lead_metadata(
         out, lead_index=0, lead_name="MLII", lead_policy="ecg2_else_ecg1"
     )
     assert out["p_source"][0] == "per_cycle"
-    assert out["t_source"][1] == "record_stpq"
+    assert out["t_source"][1] == "record_t"
     assert out["wfdb_lead_index"] == [0, 0]
     assert out["wfdb_lead_name"] == ["MLII", "MLII"]
     assert out["lead_policy"] == ["ecg2_else_ecg1", "ecg2_else_ecg1"]

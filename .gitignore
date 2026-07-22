@@ -298,7 +298,7 @@ pyhearts/processing/qrs_boundary_detection.py
 # Verification/utility scripts
 verify_*.py
 
-# Local-only legacy presets and analysis scripts (not shipped in the toolbox)
+# Local-only archived presets and analysis scripts (not shipped in the toolbox)
 pyhearts/legacy/
 scripts/
 

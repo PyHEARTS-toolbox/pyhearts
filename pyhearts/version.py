@@ -1,3 +1,3 @@
-"""Package version for the frozen validated hybrid release."""
+"""Package version string for PyHEARTS."""
 
-__version__ = "2.0.0"
+__version__ = "1.0.0"

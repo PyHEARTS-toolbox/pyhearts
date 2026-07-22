@@ -4,7 +4,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pyhearts import ProcessCycleConfig, PyHEARTS
+from pyhearts import PyHEARTS
+from pyhearts.config import ProcessCycleConfig
 
 
 def _short_ecg(sampling_rate: float = 500.0, beats: int = 5) -> np.ndarray:
@@ -25,16 +26,16 @@ def test_default_config_instantiates():
     ProcessCycleConfig()
 
 
-def test_human_species_uses_hybrid_pipeline():
+def test_human_species_uses_unified_pipeline():
     analyzer = PyHEARTS(sampling_rate=500.0, species="human")
-    assert analyzer.cfg.version == "hybrid-t-2025-stpq"
-    assert analyzer.core_cfg.version == "v1-human"
-    assert analyzer.apply_stpq_t is True
+    assert analyzer.pipeline_version == "morphology-record-t"
+    assert analyzer.cfg.version == "v1-human"
+    assert analyzer.apply_record_t is True
 
 
 @pytest.mark.smoke
 def test_analyze_ecg_smoke():
-    """End-to-end hybrid analysis returns fitted cycles and STPQ T centers."""
+    """End-to-end analysis returns fitted cycles and record-level T centers."""
     fs = 500.0
     out, epochs = PyHEARTS(sampling_rate=fs, species="human").analyze_ecg(_short_ecg(fs, beats=8))
     assert isinstance(out, pd.DataFrame)

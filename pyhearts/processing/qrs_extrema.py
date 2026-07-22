@@ -1,5 +1,5 @@
 """
-Local Q- and S-wave extremum search for record-level STPQ template anchoring.
+Local Q- and S-wave extremum search for record-level record-T template anchoring.
 """
 
 from __future__ import annotations

@@ -386,7 +386,7 @@ def refine_r_peak_near_anchor(
     """
     Refine an R-peak index near the anchor.
 
-    ``derivative``: derivative zero-crossing (legacy detector mapping).
+    ``derivative``: derivative zero-crossing (classic detector mapping).
     ``extremum``: local max/min on the signal (TRP-style, ±window on raw/epoch).
     """
     n = len(signal)

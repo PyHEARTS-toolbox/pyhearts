@@ -3,7 +3,7 @@ Sprint 4: QRS-energy-guided coarse P/T delay priors per beat.
 
 Produces per-cycle expected R→P / R→T sample delays (template-offset units, same
 convention as ``MedianBeatTemplate.p_offset_samples`` / ``t_offset_samples``).
-Priors feed STPQ/template + outlier fences — not a replacement delineation stack.
+Priors feed record-T/template + outlier fences — not a replacement delineation stack.
 """
 
 from __future__ import annotations
@@ -131,7 +131,7 @@ def compute_record_wavelet_pt_priors(
     expected_max_energy: float,
 ) -> RecordWaveletPriors:
     """
-    Build per-cycle expected P/T template offsets for STPQ/template + outlier fences.
+    Build per-cycle expected P/T template offsets for record-T/template + outlier fences.
 
     Parameters
     ----------

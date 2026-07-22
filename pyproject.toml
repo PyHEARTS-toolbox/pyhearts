@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyhearts"
-version = "2.0.0"
-description = "Validated beat-by-beat ECG morphology analysis with record-level STPQ T detection"
+version = "1.0.0"
+description = "Beat-by-beat ECG morphology analysis with record-level record-level T detection"
 readme = "README.md"
 license = "LicenseRef-Proprietary"
 license-files = ["LICENSE.md"]
@@ -27,7 +27,7 @@ keywords = [
     "physiology",
 ]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Science/Research",
     "Intended Audience :: Healthcare Industry",
     "Operating System :: OS Independent",
@@ -78,10 +78,10 @@ docs = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/voytek-lab/pyhearts"
-Documentation = "https://pyhearts.readthedocs.io"
-Repository = "https://github.com/voytek-lab/pyhearts"
-Issues = "https://github.com/voytek-lab/pyhearts/issues"
+Homepage = "https://github.com/PyHEARTS-toolbox/pyhearts"
+Documentation = "https://github.com/PyHEARTS-toolbox/pyhearts#readme"
+Repository = "https://github.com/PyHEARTS-toolbox/pyhearts"
+Issues = "https://github.com/PyHEARTS-toolbox/pyhearts/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]

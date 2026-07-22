@@ -65,7 +65,7 @@ def pick_lead_index(
     Policies
     --------
     first
-        Always channel 0 (legacy benchmark behavior).
+        Always channel 0 (benchmark convention).
     second
         Channel 1 when present, else 0 (e.g. V5-only experiments).
     ecg2_else_ecg1
@@ -127,6 +127,16 @@ def load_wfdb_signal(
 ) -> Tuple[np.ndarray, float, int, str]:
     """
     Load one WFDB record channel.
+
+    Requires the optional ``wfdb`` extra (``pip install "pyhearts[wfdb]"``).
+
+    Parameters
+    ----------
+    record_path : str or pathlib.Path
+        Path to a WFDB record without the ``.dat``/``.hea`` extension, as
+        accepted by ``wfdb.rdrecord``.
+    policy : {"first", "ecg2_else_ecg1", "limb_preferred", "second"}, default "ecg2_else_ecg1"
+        Lead-selection policy passed to :func:`pick_lead_index`.
 
     Returns
     -------

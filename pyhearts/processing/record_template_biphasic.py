@@ -80,7 +80,7 @@ def classify_biphasic_positive_negative(
 
   Returns (morphology_tag, positive_landmark_tpl_idx, negative_landmark_tpl_idx).
   Only ``biphasic_positive_negative`` triggers specialized handling; other tags
-  mean no change to legacy pipeline.
+  mean no change to the default pipeline.
     """
     if not biphasic_pm_classification_enabled(cfg):
         return "unchanged", None, None
@@ -146,11 +146,11 @@ def apply_biphasic_pm_early_t_guardrail(
     """
     from pyhearts.processing.fiducial_provenance import set_wave_source
     from pyhearts.processing.record_delineation import (
-        _stpq_s_q_anchor_indices,
+        _record_t_s_q_anchor_indices,
         _sync_peak,
     )
     from pyhearts.processing.record_fiducial_smoothing import _sync_cycle_relative_peak
-    from pyhearts.processing.record_stpq_detection import _tpl_index_to_sample
+    from pyhearts.processing.record_t_detection import _tpl_index_to_sample
 
     stats: Dict[str, int] = {
         "adjusted": 0,
@@ -202,7 +202,7 @@ def apply_biphasic_pm_early_t_guardrail(
             continue
         r_det = int(r_peaks[epoch_i])
         r_next = int(r_peaks[epoch_i + 1]) if epoch_i + 1 < len(r_peaks) else None
-        s_i, q_next = _stpq_s_q_anchor_indices(
+        s_i, q_next = _record_t_s_q_anchor_indices(
             ecg_delim, r_det, r_next, fs, cfg
         )
         if s_i is None or q_next is None:

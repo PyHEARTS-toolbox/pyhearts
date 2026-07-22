@@ -11,7 +11,7 @@ Record gate (ablation cohort):
   - majority of beats show qualified post-apex dz (+10..+80 ms after positive peak,
     still on positive lobe, before terminal negative component)
 
-Enabled only when ``record_stpq_post_apex_dz_preference`` is True.
+Enabled only when ``record_t_post_apex_dz_preference`` is True.
 """
 
 from __future__ import annotations
@@ -124,11 +124,11 @@ def qualified_post_apex_dz_pair(
 ) -> bool:
     """Post-apex dz within configured late window and before terminal negative lobe."""
     min_late = _ms_to_samples(
-        float(getattr(cfg, "record_stpq_post_apex_dz_min_late_ms", 10.0)),
+        float(getattr(cfg, "record_t_post_apex_dz_min_late_ms", 10.0)),
         fs,
     )
     max_late = _ms_to_samples(
-        float(getattr(cfg, "record_stpq_post_apex_dz_max_late_ms", 80.0)),
+        float(getattr(cfg, "record_t_post_apex_dz_max_late_ms", 80.0)),
         fs,
     )
     late = int(dz_abs) - int(pos_abs)
@@ -147,12 +147,12 @@ def probe_post_apex_dz_beat_fraction(
     """
     Fraction of beats with template-guided positive_peak + qualified post_apex_dz.
 
-    Uses the same STPQ search path as runtime (template-guided max amplitude).
+    Uses the same record-T search path as runtime (template-guided max amplitude).
     """
     from pyhearts.processing.delineation_signal import smooth_search_window
-    from pyhearts.processing.record_stpq_detection import (
+    from pyhearts.processing.record_t_detection import (
         _search_t_template_guided,
-        _stpq_t_window_samples,
+        _record_t_window_samples,
         project_t_center_sample,
     )
 
@@ -171,7 +171,7 @@ def probe_post_apex_dz_beat_fraction(
         t_center = project_t_center_sample(int(s_i), int(q_next), tmpl, n_tpl, cfg)
         if t_center is None:
             continue
-        t_lo, t_hi = _stpq_t_window_samples(
+        t_lo, t_hi = _record_t_window_samples(
             int(s_i), int(q_next), t_j, p_j, n_tpl, cfg, tmpl=tmpl
         )
         pos_idx, _ = _search_t_template_guided(
@@ -180,7 +180,7 @@ def probe_post_apex_dz_beat_fraction(
         if pos_idx is None:
             continue
         n += 1
-        if cfg.record_stpq_use_savgol:
+        if cfg.record_t_use_savgol:
             seg, lo, _ = smooth_search_window(ecg, t_lo, t_hi, sampling_rate, cfg)
         else:
             lo = int(t_lo)
@@ -259,7 +259,7 @@ def classify_post_apex_dz_preference_template(
     template-guided positive_peak coexists with qualified post_apex_dz (+10..+80 ms,
     before terminal negative).
     """
-    if not getattr(cfg, "record_stpq_post_apex_dz_preference", False):
+    if not getattr(cfg, "record_t_post_apex_dz_preference", False):
         return False
     if tmpl is None or not getattr(tmpl, "valid", False):
         return False
@@ -275,8 +275,8 @@ def classify_post_apex_dz_preference_template(
     else:
         return False
 
-    min_frac = float(getattr(cfg, "record_stpq_post_apex_dz_min_beat_frac", 0.20))
-    max_frac = getattr(cfg, "record_stpq_post_apex_dz_max_beat_frac", 0.38)
+    min_frac = float(getattr(cfg, "record_t_post_apex_dz_min_beat_frac", 0.20))
+    max_frac = getattr(cfg, "record_t_post_apex_dz_max_beat_frac", 0.38)
     if frac < min_frac:
         return False
     if max_frac is not None and frac > float(max_frac):

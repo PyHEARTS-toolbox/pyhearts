@@ -32,13 +32,13 @@ from pyhearts.processing.peaks import (
     refine_r_peak_near_anchor,
     sample_at_fractional_index,
 )
-from pyhearts.processing.record_stpq_detection import (
+from pyhearts.processing.record_t_detection import (
     _apex_with_threshold,
     _early_peak_landmark_frac,
     _is_early_peak_landmark,
     _t_search_prefer_negative,
-    defer_stpq_t_overwrite,
-    stpq_t_use_biphasic_fallback,
+    defer_record_t_overwrite,
+    record_t_use_biphasic_fallback,
 )
 
 
@@ -507,7 +507,7 @@ def _compute_template_thresholds(
     return th_t_up, th_t_down, th_p_up, th_p_down, morph
 
 
-def finalize_stpq_median_template(
+def finalize_record_t_median_template(
     template: np.ndarray,
     cfg: ProcessCycleConfig,
     sampling_rate: float,
@@ -519,7 +519,7 @@ def finalize_stpq_median_template(
     beat_anchors: Optional[List[Tuple[int, int, int]]] = None,
     ecg_work: Optional[np.ndarray] = None,
 ) -> MedianBeatTemplate:
-    """Attach STPQ landmarks/thresholds to a median S→Q template waveform."""
+    """Attach record-T landmarks/thresholds to a median S→Q template waveform."""
     template = np.asarray(template, dtype=float)
     t_j, p_j, t_landmark_source = _landmarks_closest_to_baseline(
         template, cfg, sampling_rate
@@ -608,7 +608,7 @@ def finalize_stpq_median_template(
     )
 
 
-def build_stpq_beat_template(
+def build_record_t_beat_template(
     ecg: np.ndarray,
     r_peaks: np.ndarray,
     sampling_rate: float,
@@ -624,7 +624,7 @@ def build_stpq_beat_template(
     qs_half = _ms_to_samples(cfg.record_qs_search_window_ms, sampling_rate)
 
     segments: List[np.ndarray] = []
-    stpq_anchors: List[Tuple[int, int, int]] = []
+    record_t_anchors: List[Tuple[int, int, int]] = []
     r_for_amp: List[int] = []
 
     for i in range(len(r_peaks) - 1):
@@ -643,7 +643,7 @@ def build_stpq_beat_template(
         seg = ecg_work[s_i:q_next]
         if seg.size >= 8:
             segments.append(seg)
-            stpq_anchors.append((int(s_i), int(q_next), int(r_i)))
+            record_t_anchors.append((int(s_i), int(q_next), int(r_i)))
 
     pre_r = _epoch_half_width(r_peaks, sampling_rate, cfg)
     if len(segments) < cfg.record_delineation_min_beats:
@@ -680,7 +680,7 @@ def build_stpq_beat_template(
 
     r_amps = [abs(ecg[r]) for r in r_for_amp if 0 <= r < ecg.size]
     mean_r = float(np.median(r_amps)) if r_amps else 1.0
-    return finalize_stpq_median_template(
+    return finalize_record_t_median_template(
         template,
         cfg,
         sampling_rate,
@@ -688,7 +688,7 @@ def build_stpq_beat_template(
         median_rr_samples=median_rr,
         n_beats=len(segments),
         mean_r_amplitude=mean_r,
-        beat_anchors=stpq_anchors,
+        beat_anchors=record_t_anchors,
         ecg_work=ecg_work,
     )
 
@@ -699,9 +699,9 @@ def build_record_beat_template(
     sampling_rate: float,
     cfg: ProcessCycleConfig,
 ) -> MedianBeatTemplate:
-    """Dispatch R-centered median beat vs S→Q STPQ template."""
+    """Dispatch R-centered median beat vs S→Q record-T template."""
     if cfg.record_template_anchor == "s_to_q":
-        return build_stpq_beat_template(ecg, r_peaks, sampling_rate, cfg)
+        return build_record_t_beat_template(ecg, r_peaks, sampling_rate, cfg)
     return build_median_beat_template(ecg, r_peaks, sampling_rate, cfg)
 
 
@@ -832,14 +832,14 @@ def _bandpass_segment(
     return filtfilt(b, a, segment.astype(float))
 
 
-def delineate_stpq_template(
+def delineate_record_t_template(
     template: MedianBeatTemplate,
     sampling_rate: float,
     cfg: ProcessCycleConfig,
     *,
     manual_ann_ext: Optional[str] = None,
 ) -> MedianBeatTemplate:
-    """Locate P/T on STPQ template with beat-scaled windows and optional template thresholds."""
+    """Locate P/T on record-T template with beat-scaled windows and optional template thresholds."""
     if not template.valid or template.template.size < 10:
         return template
     if template.t_landmark_idx is None or template.p_landmark_idx is None:
@@ -849,16 +849,16 @@ def delineate_stpq_template(
     sig = savgol_search_segment(template.template, fs, cfg)
     t_j = int(template.t_landmark_idx)
     p_j = int(template.p_landmark_idx)
-    from pyhearts.processing.record_stpq_detection import (
-        _stpq_t_search_end_tpl_idx,
+    from pyhearts.processing.record_t_detection import (
+        _record_t_search_end_tpl_idx,
         _t_search_prefer_negative,
-        stpq_t_use_biphasic_fallback,
+        record_t_use_biphasic_fallback,
     )
 
     # Standard wide template T window — beat-level early_peak narrowing is applied later.
     t_search_end = int(
         round(
-            _stpq_t_search_end_tpl_idx(
+            _record_t_search_end_tpl_idx(
                 float(t_j),
                 float(p_j),
                 cfg,
@@ -879,7 +879,7 @@ def delineate_stpq_template(
             prefer="min" if _t_search_prefer_negative(template) else "max",
             threshold_up=th_t_up,
             threshold_down=th_t_down,
-            check_biphasic=stpq_t_use_biphasic_fallback(template),
+            check_biphasic=record_t_use_biphasic_fallback(template),
         )
     else:
         t_rel = _apex_in_segment(t_seg, prefer="min")
@@ -910,7 +910,7 @@ def delineate_stpq_template(
         p_pol = "positive" if p_rel is not None and p_seg[p_rel] >= 0 else "negative"
     p_peak_idx = (p_lo + p_rel) if p_rel is not None else None
 
-    preserve_negative_polarity = defer_stpq_t_overwrite(
+    preserve_negative_polarity = defer_record_t_overwrite(
         template, manual_ann_ext=manual_ann_ext
     ) or (
         _is_early_peak_landmark(template)
@@ -956,7 +956,7 @@ def delineate_record_template(
     manual_ann_ext: Optional[str] = None,
 ) -> MedianBeatTemplate:
     if template.template_anchor == "s_to_q":
-        return delineate_stpq_template(
+        return delineate_record_t_template(
             template, sampling_rate, cfg, manual_ann_ext=manual_ann_ext
         )
     return delineate_median_beat_template(template, sampling_rate, cfg)
@@ -1047,7 +1047,7 @@ def _local_rr_samples(
     return median_rr
 
 
-def _stpq_anchors_valid(
+def _record_t_anchors_valid(
     r_det: int,
     r_next: Optional[int],
     s_i: int,
@@ -1083,14 +1083,14 @@ def _pt_expected_offset(
     return tmpl_offset
 
 
-def _stpq_s_q_anchor_indices(
+def _record_t_s_q_anchor_indices(
     ecg_delim: np.ndarray,
     r_det: int,
     r_next: Optional[int],
     sampling_rate: float,
     cfg: ProcessCycleConfig,
 ) -> Tuple[Optional[int], Optional[int]]:
-    """Beat-local S and next-beat Q sample indices for s_to_q STPQ (diagnostics)."""
+    """Beat-local S and next-beat Q sample indices for s_to_q record-T (diagnostics)."""
     if r_next is None:
         return None, None
     from pyhearts.processing.qrs_extrema import (
@@ -1111,7 +1111,7 @@ def _stpq_s_q_anchor_indices(
     return int(s_i), int(q_next)
 
 
-def _stpq_pt_guesses_for_beat(
+def _record_t_pt_guesses_for_beat(
     ecg_delim: np.ndarray,
     r_det: int,
     r_next: Optional[int],
@@ -1123,20 +1123,20 @@ def _stpq_pt_guesses_for_beat(
     p_expected_offset: Optional[float] = None,
     t_expected_offset: Optional[float] = None,
 ) -> Tuple[Optional[float], Optional[float]]:
-    """Dispatch legacy R-centered STPQ vs S→Q beat-wise record search."""
+    """Dispatch R-centered record-T vs S→Q beat-wise record search."""
     if (
         tmpl.template_anchor == "s_to_q"
         and cfg.p_t_threshold_mode == "template"
-        and cfg.record_delineation_stpq_search
+        and cfg.record_delineation_t_search
     ):
-        from pyhearts.processing.record_stpq_detection import record_stpq_pt_guesses
+        from pyhearts.processing.record_t_detection import record_t_pt_guesses
 
         wavelet_off = (
             float(p_expected_offset) * float(scale)
             if p_expected_offset is not None
             else None
         )
-        return record_stpq_pt_guesses(
+        return record_t_pt_guesses(
             ecg_delim,
             r_det,
             r_next,
@@ -1146,7 +1146,7 @@ def _stpq_pt_guesses_for_beat(
             scale,
             wavelet_pr_offset_samples=wavelet_off,
         )
-    return _stpq_pt_guesses(
+    return _record_t_pt_guesses(
         ecg_delim,
         r_det,
         r_next,
@@ -1159,7 +1159,7 @@ def _stpq_pt_guesses_for_beat(
     )
 
 
-def _stpq_pt_guesses(
+def _record_t_pt_guesses(
     ecg_delim: np.ndarray,
     r_det: int,
     r_next: Optional[int],
@@ -1172,7 +1172,7 @@ def _stpq_pt_guesses(
     t_expected_offset: Optional[float] = None,
 ) -> Tuple[Optional[float], Optional[float]]:
     """
-    Map STPQ template indices to global P/T guesses with beat-specific Q/S validation.
+    Map record-T template indices to global P/T guesses with beat-specific Q/S validation.
     """
     t_guess: Optional[float] = None
     p_guess: Optional[float] = None
@@ -1187,7 +1187,7 @@ def _stpq_pt_guesses(
         q_next = _find_q_before_r(ecg_delim, int(r_next), fs, cfg)
         if q_next is None:
             return None, None
-        if not _stpq_anchors_valid(r_det, r_next, s_i, q_next, fs, cfg):
+        if not _record_t_anchors_valid(r_det, r_next, s_i, q_next, fs, cfg):
             return None, None
 
     t_off_base = _pt_expected_offset(
@@ -1235,7 +1235,7 @@ def _stpq_pt_guesses(
     return t_guess, p_guess
 
 
-def _should_replace_stpq_peak(
+def _should_replace_record_t_peak(
     existing: float,
     r_g: float,
     guess: Optional[float],
@@ -1245,7 +1245,7 @@ def _should_replace_stpq_peak(
     cfg: ProcessCycleConfig,
     delay_mad: Optional[float],
 ) -> bool:
-    """STPQ: only replace missing peaks or large outliers vs template RT/RP delay."""
+    """record-T: only replace missing peaks or large outliers vs template RT/RP delay."""
     if guess is None:
         return False
     if not _finite(existing):
@@ -1266,7 +1266,7 @@ def _refine_trace_for_cycle(
     """
     Full-record trace passed into ``_refine_on_cycle`` for local apex search.
 
-    STPQ/template guesses are always computed on ``ecg_delineation``; this only
+    record-T/template guesses are always computed on ``ecg_delineation``; this only
     selects the substrate for the post-guess refine window.
     """
     mode = cfg.record_delineation_refine_signal
@@ -1379,8 +1379,8 @@ def _sync_peak(
 
 
 def _record_pt_source(cfg: ProcessCycleConfig) -> str:
-    if cfg.record_delineation_stpq_search and cfg.record_template_anchor == "s_to_q":
-        return "record_stpq"
+    if cfg.record_delineation_t_search and cfg.record_template_anchor == "s_to_q":
+        return "record_t"
     return "record_template"
 
 
@@ -1395,7 +1395,7 @@ def _force_map_wave(cfg: ProcessCycleConfig, wave: str) -> bool:
 
 
 def _unconditional_record_pt_replace(cfg: ProcessCycleConfig, wave: str) -> bool:
-    """True when record mapping must not be vetoed by outlier-only STPQ checks."""
+    """True when record mapping must not be vetoed by outlier-only record-T checks."""
     if p_t_detection_is_record_only(cfg):
         return True
     if wave == "P":
@@ -1431,7 +1431,7 @@ def _should_replace_p(
             and t_delay_mad is not None
             and cfg.record_delineation_replace_t_if_outlier
         ):
-            replace_p = _should_replace_stpq_peak(
+            replace_p = _should_replace_record_t_peak(
                 float(existing_p),
                 float(r_g),
                 None,
@@ -1490,7 +1490,7 @@ def _should_replace_t(
             and t_delay_mad is not None
             and cfg.record_delineation_replace_t_if_outlier
         ):
-            replace_t = _should_replace_stpq_peak(
+            replace_t = _should_replace_record_t_peak(
                 float(existing_t),
                 float(r_g),
                 None,
@@ -1519,7 +1519,7 @@ def _should_replace_t(
                 replace_t = True
     if not replace_t:
         return False
-    if defer_stpq_t_overwrite(tmpl, manual_ann_ext=manual_ann_ext) and _finite(existing_t):
+    if defer_record_t_overwrite(tmpl, manual_ann_ext=manual_ann_ext) and _finite(existing_t):
         return False
     return True
 
@@ -1548,10 +1548,10 @@ def _resolve_p_guess(
     p_expected_offset: Optional[float] = None,
     t_expected_offset: Optional[float] = None,
 ) -> Tuple[Optional[float], str]:
-    """STPQ guess with optional template-delay fallback. Returns (guess, source tag)."""
+    """record-T guess with optional template-delay fallback. Returns (guess, source tag)."""
     p_off = _pt_expected_offset(tmpl.p_offset_samples, p_expected_offset, cfg)
     if tmpl.template_anchor == "s_to_q":
-        _, p_guess_f = _stpq_pt_guesses_for_beat(
+        _, p_guess_f = _record_t_pt_guesses_for_beat(
             ecg_delim,
             r_det,
             r_next,
@@ -1564,10 +1564,10 @@ def _resolve_p_guess(
         )
         if p_guess_f is not None:
             return p_guess_f, _record_pt_source(cfg)
-        stats["p_stpq_miss"] = stats.get("p_stpq_miss", 0) + 1
+        stats["p_record_miss"] = stats.get("p_record_miss", 0) + 1
         if cfg.record_delineation_template_fallback:
-            if cfg.record_stpq_p_r_anchor:
-                from pyhearts.processing.record_stpq_detection import record_fallback_p_search
+            if cfg.record_t_p_r_anchor:
+                from pyhearts.processing.record_t_detection import record_fallback_p_search
 
                 wavelet_off = (
                     float(p_expected_offset) * float(scale)
@@ -1619,7 +1619,7 @@ def _resolve_t_guess(
 ) -> Tuple[Optional[float], str]:
     t_off = _pt_expected_offset(tmpl.t_offset_samples, t_expected_offset, cfg)
     if tmpl.template_anchor == "s_to_q":
-        t_guess_f, _ = _stpq_pt_guesses_for_beat(
+        t_guess_f, _ = _record_t_pt_guesses_for_beat(
             ecg_delim,
             r_det,
             r_next,
@@ -1632,7 +1632,7 @@ def _resolve_t_guess(
         )
         if t_guess_f is not None:
             return t_guess_f, _record_pt_source(cfg)
-        stats["t_stpq_miss"] = stats.get("t_stpq_miss", 0) + 1
+        stats["t_record_miss"] = stats.get("t_record_miss", 0) + 1
         if cfg.record_delineation_template_fallback:
             guess = _template_offset_guess(r_g, t_off, scale)
             if guess is not None:
@@ -1666,7 +1666,7 @@ def _fill_missing_t_after_record_pass(
     stats: Dict[str, int],
     modified_cycles: Set[int],
 ) -> None:
-    """STPQ/template for beats that still lack T after the gated record pass."""
+    """record-T/template for beats that still lack T after the gated record pass."""
     if not cfg.record_delineation_fill_missing_t or tmpl.t_offset_samples is None:
         return
 
@@ -1777,7 +1777,7 @@ def apply_record_fill_missing_t(
     verbose: bool = False,
 ) -> Dict[str, int]:
     """
-    STPQ/template fill for beats with NaN T (e.g. after RT plausibility cleared them).
+    record-T/template fill for beats with NaN T (e.g. after RT plausibility cleared them).
 
     Rebuilds the record template; does not remap beats that already have finite T.
     """
@@ -1895,8 +1895,8 @@ def apply_record_level_delineation(
         "t_mapped": 0,
         "r_mapped": 0,
         "features_refreshed": 0,
-        "p_stpq_miss": 0,
-        "t_stpq_miss": 0,
+        "p_record_miss": 0,
+        "t_record_miss": 0,
         "p_template_fallback": 0,
         "t_template_fallback": 0,
         "p_mapped_forced": 0,
@@ -1924,12 +1924,12 @@ def apply_record_level_delineation(
     if not tmpl.valid or tmpl.p_offset_samples is None and tmpl.t_offset_samples is None:
         return stats
 
-    if getattr(cfg, "record_stpq_p_r_anchor", False) and getattr(
-        cfg, "record_stpq_p_r_anchor_mode", "next_r"
+    if getattr(cfg, "record_t_p_r_anchor", False) and getattr(
+        cfg, "record_t_p_r_anchor_mode", "next_r"
     ) == "current_r":
         from dataclasses import replace
 
-        from pyhearts.processing.record_stpq_detection import estimate_record_p_pr_center_ms
+        from pyhearts.processing.record_t_detection import estimate_record_p_pr_center_ms
 
         p_pr_center = estimate_record_p_pr_center_ms(
             ecg_delim, r_peaks, sampling_rate, cfg
@@ -2173,14 +2173,14 @@ def apply_record_level_delineation(
                     p_expected_offset=p_expected,
                 )
                 guardrail_ms = float(
-                    getattr(cfg, "record_stpq_t_per_cycle_guardrail_ms", 0.0) or 0.0
+                    getattr(cfg, "record_t_per_cycle_guardrail_ms", 0.0) or 0.0
                 )
                 if (
                     had_t
                     and cfg.t_wave_use_record_prior
                     and guardrail_ms > 0
                     and t_guess is not None
-                    and defer_stpq_t_overwrite(tmpl, manual_ann_ext=manual_ann_ext)
+                    and defer_record_t_overwrite(tmpl, manual_ann_ext=manual_ann_ext)
                 ):
                     shift_ms = (
                         abs(float(t_guess) - float(existing_t))
@@ -2195,7 +2195,7 @@ def apply_record_level_delineation(
                 t_guess, t_src = float(existing_t), "refine_only"
             if t_guess is not None and t_src:
                 s_anchor, q_anchor = (
-                    _stpq_s_q_anchor_indices(
+                    _record_t_s_q_anchor_indices(
                         ecg_delim, r_det, r_next, sampling_rate, cfg
                     )
                     if tmpl.template_anchor == "s_to_q"
@@ -2219,7 +2219,7 @@ def apply_record_level_delineation(
                     set_t_timing_audit(
                         output_dict,
                         cycle_idx,
-                        t_stpq_guess=float(t_guess),
+                        t_record_guess=float(t_guess),
                         t_refined=float(t_ref),
                         s_anchor=float(s_anchor) if s_anchor is not None else np.nan,
                         q_anchor=float(q_anchor) if q_anchor is not None else np.nan,
