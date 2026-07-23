@@ -115,6 +115,13 @@ raw_data/
 results/
 benchmark_results/
 
+# Held-out validation: keep lockfiles + protocol; ignore bulky run products
+validation/output/
+!validation/
+!validation/**/*.py
+!validation/**/*.md
+!validation/config_frozen*.json
+
 # Archived July 2026 ensemble investigation and related non-mainline notes
 documentation/
 reviewer_response_updated.md
@@ -250,6 +257,7 @@ investigate_*.py
 plot_*.py
 regenerate_*.py
 run_*.py
+!validation/run_*.py
 test_original_*.py
 test_sel*.py
 test_ecgpuwave_*.py
@@ -304,3 +312,5 @@ scripts/
 
 # Local-only archived sprint/ablation tests (not run in CI)
 tests/archive/
+# Example analysis outputs
+examples/output/
