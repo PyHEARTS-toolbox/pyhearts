@@ -43,6 +43,11 @@ the **detected R-peak series** (before epoch quality filtering), gated by
 `rr_bounds_ms`. It does not use morphology-retained `RR_interval_ms` rows.
 Requires ≥60 valid RR intervals; returns mean heart rate, SDNN, RMSSD, and NN50.
 
+Morphology R detection enables **auto-polarity** by default
+(`rpeak_auto_polarity=True`): inverted QRS / lead polarity is detected, the
+working trace is negated for analysis, and `analyzer.signal_inverted` records
+whether a flip occurred.
+
 ## What happens under the hood
 
 1. Morphology detection finds R/P, segments cycles, and fits symmetric Gaussians.
@@ -51,10 +56,18 @@ Requires ≥60 valid RR intervals; returns mean heart rate, SDNN, RMSSD, and NN5
 
 There is no skewed-Gaussian runtime option.
 
-## QTDB annotation policy
+## QTDB annotation policy (development / benchmark)
 
-The manual QTDB benchmark used ECG1 (channel 0) with the `q1c`
-cardiologist annotations.
+QTDB is a **development and benchmark** corpus (including the Dec 2024 default
+re-tune), not a held-out validation set for current public defaults. Held-out
+morphology evaluation uses LUDB with a frozen config — see
+``validation/README.md``.
+
+The manual QTDB morphology reference uses ECG1 (channel 0) with the ``q1c``
+cardiologist annotations. Treat these marks as a **reference** (report against
+published inter-annotator variability), not absolute ground truth. Synthetic
+R-peak stress tests in ``examples/sim_rpeak_*.py`` are a separate prerequisite
+and do not validate morphology.
 
 ```python
 from pyhearts import load_wfdb_signal
@@ -64,3 +77,5 @@ ecg, fs, lead_idx, lead_name = load_wfdb_signal(
     policy="first",
 )
 ```
+
+Runnable reference script: ``examples/qtdb_morphology_reference.py``.

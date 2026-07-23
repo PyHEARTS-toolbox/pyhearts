@@ -151,18 +151,44 @@ analysis settings for reproducibility.
 
 ## Validation snapshots
 
-Research checks on public datasets (not clinical performance claims):
+Research checks on public datasets (not clinical performance claims).
+Dataset roles are not interchangeable — see ``validation/README.md``.
 
-**SPH normal-repeat subset** (802 recordings):
+**Tuning** — AA and PTB-XL (paper Methods): free parameters without clear
+physiological grounding were selected on these corpora.
+
+**Development / benchmark** — QTDB manual annotations (10 records, 300 beats,
+ECG1 / ``q1c``, ±40 ms). Used for development and the Dec 2024 default re-tune;
+**not** an independent held-out claim for current public defaults:
+
+- R / P / T sensitivity: 99.67% / 80.94% / 69.00%
+- T coverage: 99.67%
+
+**Paper-era held-outs (paper-era parameters only)** — SPH normal-repeat subset
+(802 recordings; fit quality / availability, not fiducial GT), plus MGH and
+mouse in the manuscript. Caveat: no tuning objective or record list was
+recorded for the paper-era free parameters.
 
 - Median R²: 0.9688
 - Cycles with R² > 0.9: 83.83%
 - R / P / T availability: 99.59% / 93.14% / 98.06%
 
-**QTDB manual annotations** (10 records, 300 beats, ECG1, ±40 ms):
+**Held-out (frozen public default)** — LUDB only (200 records, lead II,
+1831 manual beats). Config lockfile ``validation/config_frozen_v1.json`` was
+committed before scoring; protocol in ``validation/``. Parameter selection
+predates a formal protocol and exact tuning records are unavailable, so this
+frozen-config LUDB run is the only fully non-circular morphology evaluation.
 
-- R / P / T sensitivity: 99.67% / 80.94% / 69.00%
-- T coverage: 99.67%
+- Unconditional Se @ ±40 ms — R / P / T: 85.58% / 79.59% / 58.59%
+- Unconditional Se @ ±150 ms — R / P / T: 87.55% / 82.94% / 68.70%
+- Conditional bias (median, ms) — R / P / T: +2.0 / +2.0 / 0.0
+- Conditional scatter (σ, ms) — R / P / T: 11.0 / 33.0 / 54.1
+
+**Prerequisite — synthetic R-peak robustness** (parametric Gaussian beats):
+noise / contamination / rate / missing-wave stress tests in
+``examples/sim_rpeak_*.py``. These characterize R localization only; they do
+**not** validate morphology accuracy (the generative model coincides with
+PyHEARTS's fitting assumptions).
 
 ## Development
 

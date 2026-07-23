@@ -189,9 +189,11 @@ def match_r_anchors(
     fs: float,
     max_error_ms: float = 150.0,
 ) -> dict[int, int]:
+    if detected is None or len(detected) == 0 or "R_global_center_idx" not in detected.columns:
+        return {}
     manual_r = manual["manual_R_sample"].to_numpy(dtype=float)
     detected_r = pd.to_numeric(
-        detected.get("R_global_center_idx"), errors="coerce"
+        detected["R_global_center_idx"], errors="coerce"
     ).to_numpy(dtype=float)
     valid = np.flatnonzero(np.isfinite(detected_r))
     if manual_r.size == 0 or valid.size == 0:
@@ -256,7 +258,13 @@ def score_record(
         ann = wfdb.rdann(str(path), ext)
         manual = manual_beats_from_ann(ann, fs)
         analyzer = build_analyzer(fs, frozen, core_overrides=core_overrides)
-        features, _ = analyzer.analyze_ecg(ecg)
+        try:
+            features, _ = analyzer.analyze_ecg(ecg)
+        except Exception as exc:  # noqa: BLE001 — held-out must continue on analyzer failures
+            print(f"{record}: analyzer failed ({type(exc).__name__}: {exc})")
+            features = pd.DataFrame()
+        if features is None:
+            features = pd.DataFrame()
 
     matches = match_r_anchors(manual, features, fs)
     rows = []

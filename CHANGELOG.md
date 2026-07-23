@@ -7,10 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Morphology R-peak auto-polarity: inverted QRS / lead polarity is detected
+  (`detect_signal_polarity`) and the analysis trace is uprighted before peak
+  finding and morphology / record-T. Disable with `rpeak_auto_polarity=False`.
+- Held-out validation protocol under `validation/`: frozen public-default
+  config (`config_frozen_v1.json`), LUDB-only primary scoring, and post-lock
+  sensitivity sweep. Optional paper-era morphology arm lockfile included.
+  Primary LUDB (200 records, lead II): unconditional Se @ ±40 ms R/P/T =
+  85.58% / 79.59% / 58.59%.
+
 ### Changed
 - `compute_hrv_metrics` now builds RR intervals from detected R peaks
   (pre-epoch / pre-morphology), physiology-gated by `rr_bounds_ms`, instead of
   using retained-cycle `RR_interval_ms`. Morphology feature-table RR is unchanged.
+- Dataset role language: QTDB is development/benchmark (not held-out for
+  current defaults); AA/PTB-XL are tuning; SPH/MGH/mouse are paper-era
+  held-outs for paper-era parameters only; LUDB is the frozen-config held-out.
 
 ## [1.0.0] - 2026-07-22
 
@@ -29,7 +42,11 @@ First public release of the PyHEARTS toolbox.
 - Unit, smoke, and pipeline regression tests; CI packaging check.
 
 ### Validation
+- Dataset roles: AA/PTB-XL = tuning; QTDB = development/benchmark (incl. Dec
+  2024 re-tune); SPH/MGH/mouse = paper-era held-outs for paper-era parameters
+  only (no recorded tuning objective/record list); LUDB = frozen-config
+  held-out for current public defaults (`validation/`).
 - SPH normal-repeat subset: 802 recordings, median R² 0.9688, 83.83% of
   fitted cycles above R² 0.9, and 98.06% T availability.
-- QTDB manual subset: 300 expert beats, 99.67% R sensitivity, 80.94% P
-  sensitivity, and 69.00% T sensitivity within ±40 ms.
+- QTDB manual subset (development/benchmark): 300 expert beats, 99.67% R
+  sensitivity, 80.94% P sensitivity, and 69.00% T sensitivity within ±40 ms.
