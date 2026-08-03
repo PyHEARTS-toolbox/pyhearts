@@ -19,8 +19,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Mouse morphology T search: compact post-S window (`t_ignore_wavelet_guard`,
   `t_end_margin_ms`), reseed when prior fit lacks T (`t_reseed_if_missing`),
   and height-above-baseline SNR gating (`t_height_above_baseline`). Enabled
-  only in `ProcessCycleConfig.for_mouse()` (`version=v1-mouse-t`); human
-  defaults unchanged.
+  only in `ProcessCycleConfig.for_mouse()` (`version=v1-fitbounds-clip-mouse-t`);
+  human defaults unchanged.
+- Record-T merge fusion (human_unified): restore Gaussian T on record-T miss
+  (`record_t_fallback_gaussian_on_miss`) and prefer Gaussian when it is ≥20 ms
+  later (`record_t_prefer_later_gaussian_ms`). Lifts LUDB lead-II T Se@40 from
+  ~62% to ~75%+ without changing the record-T search itself.
+
+### Fixed
+- Clip Gaussian `curve_fit` initial guesses into their parameter bounds before
+  SciPy `trf` (`clip_guess_to_bounds`). CASE 2 previously passed raw `p0`, so
+  tight `bound_factor` values produced mass "Initial guess is outside of
+  provided bounds" failures and NaN `R_global_center_idx` exports — falsely
+  looking like R-detection failures.
 
 ### Changed
 - `compute_hrv_metrics` now builds RR intervals from detected R peaks

@@ -1,7 +1,7 @@
 #Processing functions for ECG signal
 from .initdict import initialize_output_dict
 from .preprocess import preprocess_ecg
-from .rpeak import r_peak_detection
+from .rpeak import detect_signal_polarity, r_peak_detection
 from .epoch import epoch_ecg
 from .peaks import find_peaks
 from .gaussian import compute_gauss_std, gaussian_function

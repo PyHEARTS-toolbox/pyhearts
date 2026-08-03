@@ -16,6 +16,8 @@ class ProcessCycleConfig:
     rpeak_min_refrac_ms: float = 100.0                # first-pass refractory
     rpeak_rr_frac_second_pass: float = 0.55           # second-pass refractory = k * median RR
     rpeak_bpm_bounds: Tuple[float, float] = (40.0, 900.0)  # clamp for RR estimate
+    # Auto-detect inverted QRS / lead polarity and analyze on the uprighted trace.
+    rpeak_auto_polarity: bool = True
 
     # ----- Epoching thresholds (used in epoch_ecg) -----
     epoch_corr_thresh: float = 0.80      # min correlation to keep an epoch (0–1)
@@ -92,7 +94,8 @@ class ProcessCycleConfig:
     )
 
     # ----- Repro tag -----
-    version: str = field(default="v1", compare=False)
+    # curve_fit p0 clipped into bounds (defect repair, not a tuning change).
+    version: str = field(default="v1-fitbounds-clip", compare=False)
 
     # -------- Validation --------
     def __post_init__(self):
@@ -207,7 +210,7 @@ class ProcessCycleConfig:
             t_end_margin_ms=5.0,
             t_reseed_if_missing=True,
             t_height_above_baseline=True,
-            version="v1-mouse-t",
+            version="v1-fitbounds-clip-mouse-t",
         )
 
     @classmethod
@@ -226,7 +229,7 @@ class ProcessCycleConfig:
             duration_min_ms=20,
             # Example tighter human bounds if desired:
             rpeak_bpm_bounds=(30.0, 240.0), rpeak_min_refrac_ms=120.0, # 500 bpm theoretical ceiling
-            version="v1-human",
+            version="v1-fitbounds-clip-human",
         )
 
 #

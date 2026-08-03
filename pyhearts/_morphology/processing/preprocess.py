@@ -43,8 +43,9 @@ def preprocess_ecg(
         Quality factor for notch filter. Required if `notch_frequency` is set.
     poly_degree : int, optional
         Degree of polynomial for detrending. If None, detrending is skipped.
-    max_nan_frac : float, default=0.05
-        Maximum allowable fraction of NaN values for interpolation (e.g., 0.01 = 1%).
+    max_nan_frac : float, default=0.01
+        Maximum allowable fraction of NaN values. Below this threshold, NaNs are
+        linearly interpolated from neighboring finite samples (e.g., 0.01 = 1%).
 
     Returns
     -------
@@ -59,13 +60,21 @@ def preprocess_ecg(
     try:
         ecg_processed = ecg_signal.astype(float, copy=True)
 
-        # --- Step 0: Handle NaNs with strict check ---
+        # --- Step 0: Handle sparse NaNs via linear interpolation ---
         nan_mask = np.isnan(ecg_processed)
-        
         if nan_mask.all():
             raise ValueError("All values are NaN.")
-        elif nan_mask.any():
-            raise ValueError(f"NaNs present: {nan_mask.sum()} values.")
+        if nan_mask.any():
+            nan_frac = float(nan_mask.mean())
+            if nan_frac > float(max_nan_frac):
+                raise ValueError(
+                    f"NaN fraction {nan_frac:.4f} exceeds max_nan_frac={max_nan_frac}."
+                )
+            good = ~nan_mask
+            x = np.arange(ecg_processed.size)
+            ecg_processed[nan_mask] = np.interp(
+                x[nan_mask], x[good], ecg_processed[good]
+            )
 
         # --- Step 1: Polynomial Detrending ---
         if poly_degree is not None:

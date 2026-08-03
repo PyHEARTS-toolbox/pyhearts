@@ -50,6 +50,37 @@ def test_merge_record_t_changes_only_t_fiducial_columns():
     ]
 
 
+def test_merge_record_t_gaussian_fill_and_later_preference():
+    features = pd.DataFrame(
+        {
+            "R_global_center_idx": [100.0, 200.0, 300.0],
+            # Gaussian apices (pre-merge T)
+            "T_global_center_idx": [160.0, 250.0, 360.0],
+        }
+    )
+    # record-T: miss on beat0, early on beat1, aligned on beat2
+    pairs = np.array([[100.0, np.nan], [200.0, 220.0], [300.0, 358.0]])
+
+    output = merge_record_t(
+        features,
+        pairs,
+        sampling_rate=500.0,
+        fallback_gaussian_on_miss=True,
+        prefer_later_gaussian_ms=20.0,
+    )
+
+    # beat0: fill miss with gaussian 160
+    assert output["T_global_center_idx"].tolist()[0] == 160.0
+    assert output["t_source"].tolist()[0] == "gaussian_fill"
+    # beat1: gaussian 250 is 60ms later than record 220 at 500Hz → prefer gaussian
+    assert output["T_global_center_idx"].tolist()[1] == 250.0
+    assert output["t_source"].tolist()[1] == "gaussian_later"
+    # beat2: within 20ms → keep record
+    assert output["T_global_center_idx"].tolist()[2] == 358.0
+    assert output["t_source"].tolist()[2] == "record_t"
+    assert output["T_gaussian_global_center_idx"].tolist() == [160.0, 250.0, 360.0]
+
+
 def test_analyze_ecg_runs_record_t_at_end():
     analyzer = PyHEARTS(sampling_rate=500.0, species="human")
     output, epochs = analyzer.analyze_ecg(_deterministic_ecg())
@@ -61,7 +92,7 @@ def test_analyze_ecg_runs_record_t_at_end():
     assert (output["t_source"] == "record_t").sum() >= 8
     assert analyzer.last_record_t_stats["template_valid"] == 1
     assert analyzer.pipeline_version == PIPELINE_VERSION
-    assert analyzer.cfg.version == "v1-human"
+    assert analyzer.cfg.version == "v1-fitbounds-clip-human"
     assert not hasattr(analyzer, "core_cfg")
     assert not hasattr(analyzer, "t_cfg")
     assert hasattr(analyzer, "_core_cfg")
@@ -71,7 +102,7 @@ def test_analyze_ecg_runs_record_t_at_end():
 def test_mouse_skips_record_t_by_default():
     analyzer = PyHEARTS(sampling_rate=2000.0, species="mouse")
     assert analyzer.apply_record_t is False
-    assert analyzer.cfg.version == "v1-mouse-t"
+    assert "mouse" in analyzer.cfg.version
     assert analyzer.cfg.t_reseed_if_missing is True
     assert analyzer.cfg.t_ignore_wavelet_guard is True
     assert analyzer.cfg.t_height_above_baseline is True

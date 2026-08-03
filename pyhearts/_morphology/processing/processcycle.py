@@ -11,7 +11,7 @@ from pyhearts._morphology.config import ProcessCycleConfig
 from pyhearts._morphology.feature import calc_intervals, interval_ms, extract_shape_features
 from pyhearts._morphology.fitmetrics import calc_r_squared, calc_rmse
 from pyhearts._morphology.plts import plot_fit, plot_labeled_peaks, plot_rise_decay
-from .bounds import calc_bounds
+from .bounds import calc_bounds, clip_guess_to_bounds
 from .detrend import detrend_signal
 from .gaussian import compute_gauss_std, gaussian_function
 from .peaks import find_peaks
@@ -118,10 +118,8 @@ def process_cycle(
         if verbose:
             print(f"[Cycle {cycle_idx}]: Running Curve Fit with {len(feature_list)} peaks")
 
-        # Clamp guess within bounds
-        epsilon = 1e-8  # small number to avoid edge
-        guess = np.array(feature_list).flatten()
-        guess = np.clip(guess, bounds[0] + epsilon, bounds[1] - epsilon)
+        # Defect repair: keep p0 strictly inside bounds for SciPy trf.
+        guess = clip_guess_to_bounds(np.array(feature_list, dtype=float).flatten(), bounds)
 
         try:
             gaussian_features_fit, _ = curve_fit(
@@ -571,8 +569,10 @@ def process_cycle(
                 print(f"[Cycle {cycle_idx}]: Bounds computed")
 
             # Perform curve fitting
-            p0 = valid_guess.flatten()
-            
+            # Defect repair: CASE 2 previously passed raw p0; SciPy trf
+            # rejects seeds on/outside bound edges (common at tight bound_factor).
+            p0 = clip_guess_to_bounds(valid_guess.flatten(), bounds)
+
             if verbose:
                 print(f"[Cycle {cycle_idx}]: Preparing to run curve_fit...")
             try:
@@ -616,7 +616,7 @@ def process_cycle(
             gauss_center_idxs = np.array([])
             gauss_heights = np.array([])
             gauss_stdevs = np.array([])
-            gaussian_features_to_use = np.full((len(p0),), np.nan)
+            gaussian_features_to_use = np.full((len(valid_components) * 3,), np.nan)
 
         # Ensure flat array for use in Gaussian function
         if isinstance(gaussian_features_to_use, np.ndarray) and gaussian_features_to_use.ndim == 3:

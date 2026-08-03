@@ -1,4 +1,44 @@
-from typing import List, Tuple, Union
+from __future__ import annotations
+
+from typing import List, Sequence, Tuple, Union
+
+import numpy as np
+
+
+def clip_guess_to_bounds(
+    guess: Sequence[float] | np.ndarray,
+    bounds: Tuple[np.ndarray, np.ndarray],
+    *,
+    epsilon: float = 1e-8,
+) -> np.ndarray:
+    """
+    Clip ``curve_fit`` initial guess into ``(lower, upper)`` and repair flat bounds.
+
+    SciPy ``trf`` rejects any ``p0`` element outside the open interval implied by
+    the bounds. Tight ``bound_factor`` values (and int-truncated σ limits) can put
+    a valid seed on or outside an edge; this is a defect repair, not tuning.
+    """
+    lo = np.asarray(bounds[0], dtype=float).copy()
+    hi = np.asarray(bounds[1], dtype=float).copy()
+    p0 = np.asarray(guess, dtype=float).copy()
+    if lo.shape != hi.shape or p0.shape != lo.shape:
+        raise ValueError(
+            f"guess/bounds shape mismatch: guess={p0.shape}, lo={lo.shape}, hi={hi.shape}"
+        )
+
+    # Ensure a usable open interval on every parameter.
+    flat = ~np.isfinite(lo) | ~np.isfinite(hi) | (hi <= lo)
+    if np.any(flat):
+        mid = np.where(np.isfinite(p0), p0, 0.0)
+        width = np.maximum(np.abs(mid) * 0.05, 1e-3)
+        lo = np.where(flat, mid - width, lo)
+        hi = np.where(flat, mid + width, hi)
+
+    span = hi - lo
+    # Keep epsilon inside the interval even for very narrow spans.
+    eps = np.minimum(epsilon, 0.25 * span)
+    eps = np.where(eps > 0, eps, epsilon)
+    return np.clip(p0, lo + eps, hi - eps)
 
 
 def calc_bounds(

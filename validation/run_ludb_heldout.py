@@ -6,6 +6,9 @@ QTDB peak-reference protocol (no new metrics after seeing results):
 
 * unconditional sensitivity at ±40 ms and ±150 ms (and full Se(tolerance) curve)
 * conditional signed error: bias (median) + scatter (σ, IQR)
+* detector-level R-peak Se / PPV on ``analyzer.r_peak_indices`` under locked
+  window spec ``validation/rpeak_detection_window_spec_v1`` (match-first;
+  unmatched detections outside W+tol are indeterminate, not FP)
 
 Lead policy: limb-preferred (II when present). Cardiologist annotations are a
 reference with known inter-observer variability, not absolute ground truth.
@@ -208,6 +211,130 @@ def match_r_anchors(
     }
 
 
+def match_samples_one_to_one(
+    reference: np.ndarray,
+    detected: np.ndarray,
+    *,
+    tol_samples: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Hungarian one-to-one match; returns (ref_idx, det_idx) within tolerance."""
+    ref = np.asarray(reference, dtype=float)
+    det = np.asarray(detected, dtype=float)
+    if ref.size == 0 or det.size == 0:
+        return np.array([], dtype=int), np.array([], dtype=int)
+    cost = np.abs(ref[:, None] - det[None, :])
+    mi, di = linear_sum_assignment(cost)
+    keep = cost[mi, di] <= tol_samples
+    return mi[keep].astype(int), di[keep].astype(int)
+
+
+def score_detector_rpeaks_windowed(
+    manual_r: np.ndarray,
+    detected_r: np.ndarray,
+    *,
+    fs: float,
+    tol_ms: float,
+) -> dict[str, Any]:
+    """Detector Se/PPV under locked window spec v1 (match first, then classify).
+
+    W = [t_first_ann, t_last_ann]. Unmatched detections outside W+tol are
+    indeterminate (excluded from PPV), not false positives.
+    """
+    ref = np.asarray(manual_r, dtype=float)
+    det = np.asarray(detected_r, dtype=float)
+    ref = ref[np.isfinite(ref)]
+    det = det[np.isfinite(det)]
+    n_ref = int(ref.size)
+    n_detections = int(det.size)
+    tol_samples = float(tol_ms) * float(fs) / 1000.0
+
+    if n_ref == 0:
+        return {
+            "tol_ms": float(tol_ms),
+            "t_first_ann_s": np.nan,
+            "t_last_ann_s": np.nan,
+            "n_ref": 0,
+            "n_detections": n_detections,
+            "n_in_window": 0,
+            "n_indeterminate": n_detections,
+            "TP": 0,
+            "FP": 0,
+            "FN": 0,
+            "sensitivity": np.nan,
+            "ppv": np.nan,
+        }
+
+    t_first = float(np.min(ref))
+    t_last = float(np.max(ref))
+    w_lo = t_first - tol_samples
+    w_hi = t_last + tol_samples
+
+    # Trap 1: match all detections to all annotations, then classify.
+    mi, di = match_samples_one_to_one(ref, det, tol_samples=tol_samples)
+    matched_det = set(int(j) for j in di)
+    tp = int(mi.size)
+    fn = n_ref - tp
+
+    in_window = (det >= w_lo) & (det <= w_hi)
+    n_in_window = int(np.sum(in_window))
+    fp = 0
+    n_indeterminate = 0
+    for j in range(n_detections):
+        if j in matched_det:
+            continue
+        if in_window[j]:
+            fp += 1
+        else:
+            n_indeterminate += 1
+
+    return {
+        "tol_ms": float(tol_ms),
+        "t_first_ann_s": t_first / float(fs),
+        "t_last_ann_s": t_last / float(fs),
+        "n_ref": n_ref,
+        "n_detections": n_detections,
+        "n_in_window": n_in_window,
+        "n_indeterminate": n_indeterminate,
+        "TP": tp,
+        "FP": fp,
+        "FN": fn,
+        "sensitivity": tp / n_ref if n_ref else np.nan,
+        "ppv": tp / (tp + fp) if (tp + fp) else np.nan,
+    }
+
+
+def pool_rpeak_detection(per_record: pd.DataFrame) -> pd.DataFrame:
+    """Pooled corpus summary; one row per tolerance (denominators are tol-dependent)."""
+    rows = []
+    for tol, g in per_record.groupby("tol_ms", sort=True):
+        tp = int(g["TP"].sum())
+        fp = int(g["FP"].sum())
+        fn = int(g["FN"].sum())
+        n_ref = int(g["n_ref"].sum())
+        n_det = int(g["n_detections"].sum())
+        n_in = int(g["n_in_window"].sum())
+        n_ind = int(g["n_indeterminate"].sum())
+        rows.append(
+            {
+                "tol_ms": float(tol),
+                "n_records": int(g["record"].nunique()),
+                "n_ref": n_ref,
+                "n_detections": n_det,
+                "n_in_window": n_in,
+                "n_indeterminate": n_ind,
+                "TP": tp,
+                "FP": fp,
+                "FN": fn,
+                "sensitivity": tp / n_ref if n_ref else np.nan,
+                "ppv": tp / (tp + fp) if (tp + fp) else np.nan,
+                # Audit identities (should hold exactly).
+                "audit_tp_fn_eq_n_ref": bool(tp + fn == n_ref),
+                "audit_tp_fp_ind_eq_n_det": bool(tp + fp + n_ind == n_det),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def ludb_ann_ext(lead_name: str) -> str | None:
     key = str(lead_name).strip().lower().replace(" ", "")
     return LUDB_LEAD_EXT.get(key)
@@ -233,7 +360,18 @@ def score_record(
     frozen: dict[str, Any],
     *,
     core_overrides: dict[str, Any] | None = None,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Score one LUDB record.
+
+    Returns
+    -------
+    beats
+        Morphology fiducial beat table (unchanged schema).
+    rpeak_detection
+        Detector-level R Se/PPV under window spec v1; one row per primary
+        tolerance. Empty if the record has no usable annotation.
+    """
+    empty = pd.DataFrame(), pd.DataFrame()
     path = record_path(data_dir, record)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
@@ -254,7 +392,7 @@ def score_record(
                         ext = candidate
                         break
             else:
-                return pd.DataFrame()
+                return empty
         ann = wfdb.rdann(str(path), ext)
         manual = manual_beats_from_ann(ann, fs)
         analyzer = build_analyzer(fs, frozen, core_overrides=core_overrides)
@@ -265,6 +403,12 @@ def score_record(
             features = pd.DataFrame()
         if features is None:
             features = pd.DataFrame()
+        raw_peaks = getattr(analyzer, "r_peak_indices", None)
+        detector_r = (
+            np.asarray(raw_peaks, dtype=float)
+            if raw_peaks is not None
+            else np.array([], dtype=float)
+        )
 
     matches = match_r_anchors(manual, features, fs)
     rows = []
@@ -303,7 +447,28 @@ def score_record(
             out[f"{wave}_manual_present"] = bool(np.isfinite(manual_sample))
             out[f"{wave}_detected"] = bool(np.isfinite(detected_sample))
         rows.append(out)
-    return pd.DataFrame(rows)
+
+    manual_r = manual["manual_R_sample"].to_numpy(dtype=float)
+    rpeak_rows: list[dict[str, Any]] = []
+    for tol in PRIMARY_TOLS_MS:
+        scored = score_detector_rpeaks_windowed(
+            manual_r, detector_r, fs=float(fs), tol_ms=float(tol)
+        )
+        scored.update(
+            {
+                "record": record,
+                "fs": float(fs),
+                "lead_index": int(lead_idx),
+                "lead_name": lead_name,
+                "ann_ext": ext,
+                "signal_inverted": bool(getattr(analyzer, "signal_inverted", False)),
+                "window_spec": "rpeak_detection_window_spec_v1",
+                "detector_source": "analyzer.r_peak_indices",
+            }
+        )
+        rpeak_rows.append(scored)
+
+    return pd.DataFrame(rows), pd.DataFrame(rpeak_rows)
 
 
 def unconditional_sensitivity(beats: pd.DataFrame, wave: str, tol_ms: float) -> dict:
@@ -367,30 +532,49 @@ def run_corpus(
     *,
     max_records: int | None = None,
     core_overrides: dict[str, Any] | None = None,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     records = list_ludb_records(data_dir)
     if max_records is not None:
-        records = records[:max_records]
+        records = records[: max_records]
     if not records:
         raise FileNotFoundError(f"No LUDB .hea records under {data_dir}")
 
-    tables: list[pd.DataFrame] = []
+    beat_tables: list[pd.DataFrame] = []
+    rpeak_tables: list[pd.DataFrame] = []
     for i, record in enumerate(records, 1):
-        scored = score_record(
+        scored, rpeak = score_record(
             record, data_dir, frozen, core_overrides=core_overrides
         )
         if scored.empty:
             print(f"[{i}/{len(records)}] {record}: SKIP (no annotation)")
             continue
-        tables.append(scored)
+        beat_tables.append(scored)
+        if not rpeak.empty:
+            rpeak_tables.append(rpeak)
+        # Detector audit line uses ±40 ms row when present.
+        r40 = rpeak[rpeak.tol_ms == 40.0] if not rpeak.empty else pd.DataFrame()
+        if len(r40):
+            det_note = (
+                f"det_Se40={float(r40.sensitivity.iloc[0]):.3f} "
+                f"det_PPV40={float(r40.ppv.iloc[0]):.3f} "
+                f"indet40={int(r40.n_indeterminate.iloc[0])}"
+            )
+        else:
+            det_note = "det=n/a"
         print(
             f"[{i}/{len(records)}] {record}: "
             f"manual_R={len(scored)} matched_R={int(scored.r_anchor_matched.sum())} "
-            f"lead={scored.lead_name.iloc[0]}"
+            f"lead={scored.lead_name.iloc[0]} {det_note}"
         )
-    if not tables:
+    if not beat_tables:
         raise RuntimeError("No LUDB records scored")
-    return pd.concat(tables, ignore_index=True)
+    beats = pd.concat(beat_tables, ignore_index=True)
+    rpeak_detection = (
+        pd.concat(rpeak_tables, ignore_index=True)
+        if rpeak_tables
+        else pd.DataFrame()
+    )
+    return beats, rpeak_detection
 
 
 def plot_se_curves(curves: pd.DataFrame, out_path: Path, title: str) -> None:
@@ -447,6 +631,7 @@ def write_primary_outputs(
     se: pd.DataFrame,
     loc: pd.DataFrame,
     curves: pd.DataFrame,
+    rpeak_detection: pd.DataFrame,
 ) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     beats.to_csv(out_dir / "ludb_beats.csv", index=False)
@@ -461,6 +646,38 @@ def write_primary_outputs(
             f"(package {__version__})"
         ),
     )
+
+    rpeak_summary = pd.DataFrame()
+    if not rpeak_detection.empty:
+        # Stable column order for the locked audit schema.
+        col_order = [
+            "record",
+            "ann_ext",
+            "tol_ms",
+            "t_first_ann_s",
+            "t_last_ann_s",
+            "n_ref",
+            "n_detections",
+            "n_in_window",
+            "n_indeterminate",
+            "TP",
+            "FP",
+            "FN",
+            "sensitivity",
+            "ppv",
+            "fs",
+            "lead_index",
+            "lead_name",
+            "signal_inverted",
+            "window_spec",
+            "detector_source",
+        ]
+        cols = [c for c in col_order if c in rpeak_detection.columns]
+        rpeak_out = rpeak_detection[cols].sort_values(["record", "tol_ms"])
+        rpeak_out.to_csv(out_dir / "ludb_rpeak_detection.csv", index=False)
+        rpeak_summary = pool_rpeak_detection(rpeak_detection)
+        rpeak_summary.to_csv(out_dir / "ludb_rpeak_detection_summary.csv", index=False)
+
     primary = se[se.tol_ms.isin(PRIMARY_TOLS_MS)].copy()
     meta = {
         "role": "held_out_primary",
@@ -478,9 +695,26 @@ def write_primary_outputs(
             "unconditional_Se_at_40_and_150_ms",
             "conditional_signed_error_bias_and_scatter",
             "Se_tolerance_curve",
+            "detector_rpeak_Se_PPV_window_spec_v1",
         ],
         "primary_se": primary.to_dict(orient="records"),
         "conditional_localization": loc.to_dict(orient="records"),
+        "rpeak_detection_window_spec": "validation/rpeak_detection_window_spec_v1.json",
+        "rpeak_detection_pooled": (
+            rpeak_summary.to_dict(orient="records") if len(rpeak_summary) else []
+        ),
+        "rpeak_detection_notes": {
+            "detector_source": "analyzer.r_peak_indices",
+            "indeterminate_soft_target": (
+                "~414 unmarked edge beats/record-extrapolated; somewhat below "
+                "is expected (strip-truncated margins); upper tail is the "
+                "over-detection diagnostic"
+            ),
+            "ppv_denominator_tolerance_dependent": (
+                "n_in_window / n_indeterminate / PPV denominator change with T "
+                "because W+T widens; report n_in_window per tolerance"
+            ),
+        },
         "protocol_note": (
             "Config was frozen and committed before this run. LUDB was not used "
             "for parameter selection. QTDB/AA/PTB-XL are not held-out for this claim."
@@ -497,6 +731,31 @@ def write_primary_outputs(
     )
     print("\n=== Conditional localization (bias / scatter) ===")
     print(loc.set_index("wave").reindex(WAVES).round(3).to_string())
+    if len(rpeak_summary):
+        print("\n=== Detector R-peak Se / PPV (window spec v1, pooled) ===")
+        print(
+            rpeak_summary[
+                [
+                    "tol_ms",
+                    "n_ref",
+                    "n_detections",
+                    "n_in_window",
+                    "n_indeterminate",
+                    "TP",
+                    "FP",
+                    "FN",
+                    "sensitivity",
+                    "ppv",
+                ]
+            ]
+            .round(4)
+            .to_string(index=False)
+        )
+        print(
+            "Note: n_in_window / n_indeterminate / PPV denominators are "
+            "tolerance-dependent (W+T widens with T). Soft indeterminate "
+            "target ~414; somewhat below is benign."
+        )
 
 
 def sensitivity_overrides(
@@ -551,7 +810,7 @@ def run_sensitivity(
         for factor in SENSITIVITY_FACTORS:
             overrides = sensitivity_overrides(frozen, knob, factor)
             print(f"\n--- sweep {knob} x{factor} overrides={overrides} ---")
-            beats = run_corpus(
+            beats, _rpeak = run_corpus(
                 data_dir,
                 frozen,
                 max_records=max_records,
@@ -651,9 +910,20 @@ def main() -> None:
         )
         return
 
-    beats = run_corpus(args.data_dir, frozen, max_records=args.max_records)
+    beats, rpeak_detection = run_corpus(
+        args.data_dir, frozen, max_records=args.max_records
+    )
     se, loc, curves = summarize_primary(beats)
-    write_primary_outputs(args.out_dir, args.frozen, frozen, beats, se, loc, curves)
+    write_primary_outputs(
+        args.out_dir,
+        args.frozen,
+        frozen,
+        beats,
+        se,
+        loc,
+        curves,
+        rpeak_detection,
+    )
     print(f"\nWrote primary held-out results to {args.out_dir}")
 
 

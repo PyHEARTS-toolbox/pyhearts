@@ -27,6 +27,31 @@ non-circular evaluation.
    (prominence, epoch_corr, SNR MAD, bound_factor × {0.5, 0.75, 1.0, 1.25, 1.5}).
 4. **Honest relabel** of QTDB / AA / PTB-XL / SPH in README and Methods.
 
+## Detector-level R-peak Se / PPV (window-bounded)
+
+LUDB R marks are mid-strip only (~7.2 s of each 10 s; ~2.07 unmarked edge
+beats/record). Full-strip PPV is invalid. Before any detector scoring, the
+window rule is locked in:
+
+- `validation/rpeak_detection_window_spec_v1.md` (human)
+- `validation/rpeak_detection_window_spec_v1.json` (machine)
+
+Summary: \(W=[t_\mathrm{first\_ann}, t_\mathrm{last\_ann}]\); match all
+detections to all annotations within \(T\); then FP = unmatched detections
+inside \(W_{+T}\); unmatched detections outside \(W_{+T}\) are
+**indeterminate** (excluded from PPV). Expansion safety @ ±150 ms confirmed
+on 200/200 records (worst clearance 210 ms, record 38).
+
+Primary run also emits detector tables (same frozen config, no morphology
+metric changes):
+
+- `ludb_rpeak_detection.csv` — one row per record × tolerance (±40 / ±150)
+- `ludb_rpeak_detection_summary.csv` — pooled totals; `n_in_window` /
+  `n_indeterminate` / PPV denominators are tolerance-dependent
+
+Soft indeterminate scale ~414 (somewhat below is benign; upper tail flags
+margin over-detection).
+
 ## Commands
 
 ```bash
@@ -52,3 +77,10 @@ Download LUDB (PhysioNet) if needed:
 ```bash
 python -c "import wfdb; wfdb.dl_database('ludb', dl_dir='data/ludb')"
 ```
+
+## Archived QTDB analysis runs
+
+QTDB lead-II fiducial runs from the July 2026 validation pass are parked under
+`validation/parked/fiducial_lead_ii_qtdb_2026-07-22/` (outputs + scripts).
+They are **not** part of the active held-out protocol; proceed with LUDB only
+until QTDB is intentionally re-enabled.

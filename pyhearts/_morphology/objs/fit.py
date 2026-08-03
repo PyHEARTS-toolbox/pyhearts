@@ -15,6 +15,7 @@ import subprocess
 from pyhearts._morphology.config import ProcessCycleConfig   
 from pyhearts._morphology.feature import calc_hrv_metrics, rr_intervals_ms_from_r_peaks
 from pyhearts._morphology.processing import (
+    detect_signal_polarity,
     epoch_ecg,
     initialize_output_dict,
     preprocess_ecg,
@@ -317,13 +318,31 @@ class PyHEARTS:
         self.hrv_metrics = {}
         self.r_peak_indices = None
         self.rr_intervals_ms = None
+        self.signal_inverted = False
 
         try:
+            working_ecg = np.asarray(ecg_signal, dtype=float)
+            if self.cfg.rpeak_auto_polarity:
+                self.signal_inverted = detect_signal_polarity(
+                    working_ecg,
+                    self.sampling_rate,
+                    min_refrac_ms=self.cfg.rpeak_min_refrac_ms,
+                )
+                if self.signal_inverted:
+                    working_ecg = -working_ecg
+                    if self.verbose:
+                        logging.info(
+                            "Inverted QRS/lead polarity detected; analyzing negated signal."
+                        )
+            self.analysis_ecg = working_ecg
+
+            # Working trace is already upright when auto-polarity flipped it.
             filtered_r_peaks = r_peak_detection(
-                    ecg_signal, 
-                self.sampling_rate, 
+                working_ecg,
+                self.sampling_rate,
                 cfg=self.cfg,
                 plot=self.plot,
+                auto_polarity=False,
             )
             self.r_peak_indices = filtered_r_peaks
         
@@ -336,7 +355,7 @@ class PyHEARTS:
                 return self.output_df, self.epochs_df
 
             epochs_df, expected_max_energy = epoch_ecg(
-                ecg_signal,
+                working_ecg,
                 filtered_r_peaks,
                 self.sampling_rate,
                 plot=self.plot,

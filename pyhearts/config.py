@@ -261,6 +261,18 @@ class ProcessCycleConfig:
     record_t_post_apex_dz_pos_early_ms: float = 8.0
     record_t_post_apex_dz_min_beat_frac: float = 0.20
     record_t_post_apex_dz_max_beat_frac: Optional[float] = 0.38
+    # Soft toggles (experimental; off by default — keep only if QTDB P/T improves)
+    # Full-window record-T multi-candidate with RR-scaled RT prior (not landmark-local).
+    soft_t_rt_multicand: bool = False
+    soft_t_rt_prior_frac_rr: float = 0.32
+    soft_t_rt_prior_sigma_ms: float = 80.0
+    soft_t_rt_timing_weight: float = 1.0
+    soft_t_rt_late_preference: float = 0.25
+    soft_t_rt_use_mid_tp_window: bool = True  # open w1 to mid(T,P) so late apex is reachable
+    # After record-T merge: restore Gaussian T on miss; if both finite and Gaussian is
+    # later by ≥ this many ms, prefer Gaussian (LUDB near-misses are systematically early).
+    record_t_fallback_gaussian_on_miss: bool = False
+    record_t_prefer_later_gaussian_ms: float = 0.0  # 0 = disabled
     record_qs_search_window_ms: float = 150.0
     record_s_search_after_r_ms: float = 200.0  # S trough can lag R in wide QRS
     record_q_search_before_r_ms: float = 150.0
@@ -653,6 +665,8 @@ class ProcessCycleConfig:
                 )
         if self.record_t_max_rt_ms <= 0:
             raise ValueError("record_t_max_rt_ms > 0")
+        if self.record_t_prefer_later_gaussian_ms < 0:
+            raise ValueError("record_t_prefer_later_gaussian_ms >= 0")
         if self.record_t_p_pr_min_ms <= 0:
             raise ValueError("record_t_p_pr_min_ms > 0")
         if self.record_t_p_pr_max_ms <= self.record_t_p_pr_min_ms:
@@ -953,6 +967,8 @@ class ProcessCycleConfig:
             record_qs_search_window_ms=150.0,
             record_s_search_after_r_ms=200.0,
             record_q_search_before_r_ms=150.0,
+            record_t_fallback_gaussian_on_miss=True,
+            record_t_prefer_later_gaussian_ms=20.0,
             version="human-unified",
         )
 

@@ -823,6 +823,65 @@ def _search_t_template_guided(
     return lo + int(best_i), pol
 
 
+def _search_t_soft_rt_multicand(
+    ecg: np.ndarray,
+    t_lo: int,
+    t_hi: int,
+    r_idx: int,
+    sampling_rate: float,
+    cfg: ProcessCycleConfig,
+    *,
+    prefer: str = "max",
+) -> Tuple[Optional[int], str]:
+    """
+    Soft multi-candidate T over the full search window using an RR-scaled RT prior.
+
+    Unlike template-guided search (local around an often-early landmark), this ranks
+    all local extrema with continuous timing cost — no hard RT cutoffs.
+    """
+    t_hi = min(len(ecg), int(t_hi) + 1)
+    if t_hi - t_lo < 3 or r_idx is None:
+        return None, "positive"
+
+    if cfg.record_t_use_savgol:
+        seg, lo, _ = smooth_search_window(ecg, t_lo, t_hi, sampling_rate, cfg)
+    else:
+        lo = int(t_lo)
+        seg = ecg[lo:t_hi].astype(float, copy=False)
+
+    peaks = _local_extrema_indices(seg, prefer=prefer)
+    if not peaks:
+        peaks = [int(np.argmax(np.abs(seg)))] if prefer == "max" else [int(np.argmin(seg))]
+
+    # RR proxy from window length (S→Q ≈ RR); prior RT = frac * RR
+    rr_samp = max(float(t_hi - t_lo), 1.0)
+    prior_rt = float(getattr(cfg, "soft_t_rt_prior_frac_rr", 0.32)) * rr_samp
+    prior_abs = float(r_idx) + prior_rt
+    sigma = max(1.0, float(getattr(cfg, "soft_t_rt_prior_sigma_ms", 80.0)) * sampling_rate / 1000.0)
+    tw = float(getattr(cfg, "soft_t_rt_timing_weight", 1.0))
+    late_w = float(getattr(cfg, "soft_t_rt_late_preference", 0.25))
+    n_seg = max(int(seg.size) - 1, 1)
+
+    best_i = None
+    best_score = -np.inf
+    for i in peaks:
+        amp = abs(float(seg[i]))
+        if amp <= 0:
+            continue
+        abs_idx = lo + int(i)
+        timing = tw * ((float(abs_idx) - prior_abs) / sigma) ** 2
+        late = late_w * (float(i) / n_seg)
+        score = amp - timing + late
+        if score > best_score:
+            best_score = score
+            best_i = int(i)
+
+    if best_i is None:
+        best_i = int(np.argmax(np.abs(seg)))
+    pol = "positive" if float(seg[best_i]) >= 0 else "negative"
+    return lo + int(best_i), pol
+
+
 def _search_p_apex_in_window(
     ecg: np.ndarray,
     p_lo: int,
@@ -1011,6 +1070,33 @@ def record_detect_t_peak(
         return None, "negative"
 
     t_center = project_t_center_sample(int(s_i), int(q_next), tmpl, n_tpl, cfg)
+
+    morph = str(getattr(tmpl, "t_morphology", "") or "")
+    soft_rt = bool(getattr(cfg, "soft_t_rt_multicand", False))
+    if (
+        soft_rt
+        and r_idx is not None
+        and morph not in ("inverted_t", "biphasic_positive_negative")
+        and not _early_peak_record_t_tuning_applies(tmpl)
+    ):
+        search_lo, search_hi = int(t_lo), int(t_hi) - 1
+        if getattr(cfg, "soft_t_rt_use_mid_tp_window", True):
+            # Open to mid(Tj,Pj) so a late apex past early rising_edge landmarks is reachable.
+            mid_tp = int(round(0.5 * (float(t_j) + float(p_j))))
+            mid_abs = int(round(s_i + (mid_tp / max(n_tpl - 1, 1)) * (q_next - s_i)))
+            search_hi = max(search_hi, min(int(q_next) - 1, mid_abs))
+            search_hi = min(search_hi, len(ecg) - 1)
+        soft = _search_t_soft_rt_multicand(
+            ecg,
+            search_lo,
+            search_hi,
+            int(r_idx),
+            sampling_rate,
+            cfg,
+            prefer="max",
+        )
+        if soft[0] is not None:
+            return soft
 
     if (
         getattr(cfg, "record_t_post_apex_dz_preference", False)

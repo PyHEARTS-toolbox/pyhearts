@@ -153,6 +153,9 @@ def merge_record_t(
     pairs: np.ndarray,
     *,
     max_r_distance_samples: int = 40,
+    sampling_rate: float | None = None,
+    fallback_gaussian_on_miss: bool = False,
+    prefer_later_gaussian_ms: float = 0.0,
 ) -> pd.DataFrame:
     """
     Merge record-level T detections into a morphology feature table.
@@ -161,23 +164,11 @@ def merge_record_t(
     ``T_global_center_idx`` into ``T_gaussian_global_center_idx``, then
     overwrites only ``T_global_center_idx`` from nearest-matched record-T pairs.
 
-    Parameters
-    ----------
-    features : pandas.DataFrame
-        Per-cycle feature table from morphology fitting. Must include
-        ``R_global_center_idx`` for matching.
-    pairs : np.ndarray
-        ``[R, T]`` pairs from :func:`detect_record_t`.
-    max_r_distance_samples : int, default 40
-        Maximum absolute sample distance allowed when matching record-T R indices
-        to morphology R indices.
+    Optional post-merge fusion with the preserved Gaussian T (LUDB-motivated):
 
-    Returns
-    -------
-    pandas.DataFrame
-        Copy of ``features`` with updated ``T_global_center_idx``,
-        ``T_gaussian_global_center_idx``, and ``t_source``
-        (``record_t``, ``record_t_miss``, or ``missing``).
+    * ``fallback_gaussian_on_miss`` — if record-T is NaN, restore Gaussian.
+    * ``prefer_later_gaussian_ms`` — if both finite and Gaussian is later by at
+      least this many ms, use Gaussian (0 disables).
     """
 
     output = features.copy()
@@ -214,6 +205,30 @@ def merge_record_t(
             else:
                 sources[cycle_idx] = "record_t_miss"
             break
+
+    gaussian = pd.to_numeric(
+        output["T_gaussian_global_center_idx"], errors="coerce"
+    ).to_numpy(dtype=float)
+
+    if fallback_gaussian_on_miss or prefer_later_gaussian_ms > 0:
+        fs = float(sampling_rate) if sampling_rate and sampling_rate > 0 else 0.0
+        for i in range(len(assigned)):
+            rec = assigned[i]
+            gau = gaussian[i]
+            if not np.isfinite(gau):
+                continue
+            if fallback_gaussian_on_miss and not np.isfinite(rec):
+                assigned[i] = gau
+                sources[i] = "gaussian_fill"
+                continue
+            if (
+                prefer_later_gaussian_ms > 0
+                and fs > 0
+                and np.isfinite(rec)
+                and (gau - rec) * 1000.0 / fs >= prefer_later_gaussian_ms
+            ):
+                assigned[i] = gau
+                sources[i] = "gaussian_later"
 
     output["T_global_center_idx"] = assigned
     output["t_source"] = sources
@@ -356,13 +371,27 @@ class PyHEARTS(_CorePyHEARTS):
             r_values = pd.to_numeric(output.get("R_global_center_idx"), errors="coerce").to_numpy(
                 dtype=float
             )
+            # Prefer the polarity-corrected analysis trace when auto-polarity flipped.
+            record_ecg = getattr(self, "analysis_ecg", None)
+            if record_ecg is None:
+                record_ecg = np.asarray(ecg_signal, dtype=float)
             pairs, self.last_record_t_stats = detect_record_t(
-                np.asarray(ecg_signal, dtype=float),
+                np.asarray(record_ecg, dtype=float),
                 r_values,
                 self.sampling_rate,
                 self._t_cfg,
             )
-            output = merge_record_t(output, pairs)
+            output = merge_record_t(
+                output,
+                pairs,
+                sampling_rate=self.sampling_rate,
+                fallback_gaussian_on_miss=bool(
+                    getattr(self._t_cfg, "record_t_fallback_gaussian_on_miss", False)
+                ),
+                prefer_later_gaussian_ms=float(
+                    getattr(self._t_cfg, "record_t_prefer_later_gaussian_ms", 0.0) or 0.0
+                ),
+            )
             self.output_df = output
             self.output_dict = output.to_dict(orient="list")
 
