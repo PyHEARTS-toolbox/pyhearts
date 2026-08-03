@@ -50,6 +50,15 @@ class ProcessCycleConfig:
     savgol_window_pts: int = 7
     savgol_polyorder: int = 3
     wavelet_guard_cap_ms: int = 120  # cap for post-QRS wavelet guard used in T search
+
+    # ----- Mouse-oriented T search (human defaults keep legacy behavior) -----
+    # At murine RR (~80–250 ms), the human T window (wavelet guard + detrend/2 end
+    # trim) often collapses to <3 samples. These flags restore a compact post-S
+    # T search without changing human/species-agnostic defaults.
+    t_ignore_wavelet_guard: bool = False
+    t_end_margin_ms: Optional[float] = None  # None → detrend_window_ms / 2
+    t_reseed_if_missing: bool = False  # if True, CASE1 skipped when prior fit lacks T
+    t_height_above_baseline: bool = False  # score T as peak − local median (S recovery)
     
      # ----- Curve-fit -----
     bound_factor: float = 0.20           # bounds scale around (center, height, std)
@@ -131,6 +140,8 @@ class ProcessCycleConfig:
 
         if self.wavelet_guard_cap_ms <= 0:
             raise ValueError("wavelet_guard_cap_ms must be > 0")
+        if self.t_end_margin_ms is not None and self.t_end_margin_ms < 0:
+            raise ValueError("t_end_margin_ms must be ≥ 0 when set")
 
         # physiologic limits
         lo_rr, hi_rr = self.rr_bounds_ms
@@ -177,17 +188,26 @@ class ProcessCycleConfig:
         return replace(
             cls(),
             detrend_window_ms=100,
-            postQRS_refractory_window_ms = 10,    # small fixed refractory after QRS to avoid S tail
-            amp_min_ratio={"P": 0.03, "T": 0.04, "Q": 0.025, "S": 0.025},  # lead II, capture non-ideal
-            snr_mad_multiplier={"P": 2.0, "T": 2.0},
-            snr_exclusion_ms={"P": 0, "T": 20},
+            postQRS_refractory_window_ms=3,  # compact post-S gap for murine ST/T
+            amp_min_ratio={"P": 0.03, "T": 0.02, "Q": 0.025, "S": 0.025},
+            # Milder T SNR: murine T is a low post-S recovery above local baseline.
+            snr_mad_multiplier={"P": 2.0, "T": 0.75},
+            snr_exclusion_ms={"P": 0, "T": 3},
             snr_apply_savgol={"P": False, "T": True},
             rr_bounds_ms=(80, 250),                # ~750–240 bpm
             shape_max_window_ms={"P": 35, "Q": 12, "R": 18, "S": 12, "T": 60},
-            duration_min_ms=2, 
-            # R-peak knobs can stay at defaults unless you want to tighten:
-            rpeak_bpm_bounds=(300.0, 1000.0), rpeak_min_refrac_ms=67.0, # 900 bpm theoretical ceiling
-            version="v1-mouse",
+            duration_min_ms=2,
+            rpeak_bpm_bounds=(300.0, 1000.0),
+            rpeak_min_refrac_ms=67.0,
+            wavelet_base_offset_ms=1,
+            wavelet_max_offset_ms=8,
+            wavelet_guard_cap_ms=8,
+            # Compact post-S T search (does not affect human preset)
+            t_ignore_wavelet_guard=True,
+            t_end_margin_ms=5.0,
+            t_reseed_if_missing=True,
+            t_height_above_baseline=True,
+            version="v1-mouse-t",
         )
 
     @classmethod

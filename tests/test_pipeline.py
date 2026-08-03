@@ -71,7 +71,20 @@ def test_analyze_ecg_runs_record_t_at_end():
 def test_mouse_skips_record_t_by_default():
     analyzer = PyHEARTS(sampling_rate=2000.0, species="mouse")
     assert analyzer.apply_record_t is False
-    assert analyzer.cfg.version == "v1-mouse"
+    assert analyzer.cfg.version == "v1-mouse-t"
+    assert analyzer.cfg.t_reseed_if_missing is True
+    assert analyzer.cfg.t_ignore_wavelet_guard is True
+    assert analyzer.cfg.t_height_above_baseline is True
+    assert analyzer.cfg.t_end_margin_ms == 5.0
+
+
+def test_human_t_search_defaults_unchanged():
+    analyzer = PyHEARTS(sampling_rate=500.0, species="human")
+    assert analyzer.apply_record_t is True
+    assert analyzer.cfg.t_reseed_if_missing is False
+    assert analyzer.cfg.t_ignore_wavelet_guard is False
+    assert analyzer.cfg.t_height_above_baseline is False
+    assert analyzer.cfg.t_end_margin_ms is None
 
 
 def test_symmetric_gaussian_is_the_only_core_fit_option():

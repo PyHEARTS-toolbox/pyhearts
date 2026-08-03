@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sensitivity sweep. Optional paper-era morphology arm lockfile included.
   Primary LUDB (200 records, lead II): unconditional Se @ ±40 ms R/P/T =
   85.58% / 79.59% / 58.59%.
+- Mouse morphology T search: compact post-S window (`t_ignore_wavelet_guard`,
+  `t_end_margin_ms`), reseed when prior fit lacks T (`t_reseed_if_missing`),
+  and height-above-baseline SNR gating (`t_height_above_baseline`). Enabled
+  only in `ProcessCycleConfig.for_mouse()` (`version=v1-mouse-t`); human
+  defaults unchanged.
 
 ### Changed
 - `compute_hrv_metrics` now builds RR intervals from detected R peaks

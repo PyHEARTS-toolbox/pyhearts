@@ -166,6 +166,14 @@ def gate_by_local_mad(
 
     # Raw amplitude for decision (never smoothed)
     height = float(seg_raw[rel_idx])
+    # Mouse T: S-recovery peaks are often still below absolute zero on the
+    # detrended cycle; score height above the local median baseline instead.
+    use_above_baseline = bool(
+        getattr(cfg, "t_height_above_baseline", False) and comp == "T"
+    )
+    if use_above_baseline:
+        baseline = float(np.median(seg_raw))
+        height = float(seg_raw[rel_idx] - baseline)
 
     # Local MAD estimate excluding the candidate vicinity
     if baseline_mode == "rolling":
@@ -187,7 +195,11 @@ def gate_by_local_mad(
     if mad <= 1e-9:
         return [True, rel_idx, height]  # degenerate/flat noise → accept
 
-    keep = (abs(height) >= k * mad)
+    if use_above_baseline:
+        # Require an upright recovery above baseline (positive height).
+        keep = height >= k * mad
+    else:
+        keep = abs(height) >= k * mad
     return [keep, rel_idx, height]
 
 

@@ -314,3 +314,18 @@ scripts/
 tests/archive/
 # Example analysis outputs
 examples/output/
+
+# Local-only extras (research harnesses, parked validation, WIP notes) —
+# keep on disk; do not ship in the toolbox core.
+docs/OUTPUT_VARIABLES.md
+examples/eval_qtdb_pt_toggles.py
+examples/qtdb_morphology_reference.py
+examples/qtdb_peak_variability_analysis.py
+examples/sim_rpeak_harness.py
+examples/sim_rpeak_high_value.py
+examples/sim_rpeak_noise_sweep.py
+tests/test_fitbounds_clip.py
+tests/test_rpeak_polarity.py
+validation/ludb_rpeak_mechanism_and_prominence.py
+validation/rpeak_detection_window_spec_v1.json
+validation/parked/

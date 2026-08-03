@@ -68,7 +68,26 @@ def process_cycle(
     # ============================================================================================
     # CASE 1: Use previous Gaussian  features if available
     # ============================================================================================
-    if previous_gauss_features is not None and isinstance(previous_gauss_features, dict) and len(previous_gauss_features) > 0:
+    use_previous = (
+        previous_gauss_features is not None
+        and isinstance(previous_gauss_features, dict)
+        and len(previous_gauss_features) > 0
+    )
+    # Mouse (and any preset with t_reseed_if_missing): if the prior fit dropped T,
+    # fall through to CASE 2 so T can be re-seeded instead of locking PQRS-only.
+    if (
+        use_previous
+        and getattr(cfg, "t_reseed_if_missing", False)
+        and "T" not in previous_gauss_features
+    ):
+        if verbose:
+            print(
+                f"[Cycle {cycle_idx}]: Prior fit lacks T; reseeding morphology "
+                f"(t_reseed_if_missing=True)."
+            )
+        use_previous = False
+
+    if use_previous:
         if verbose:
             print(f"[Cycle {cycle_idx}]: CASE 1: Previous labeled Gaussian  features found. Using for bounds.")
 
@@ -412,16 +431,23 @@ def process_cycle(
         
             # 1) Lightweight guards
             gap = int(round(cfg.postQRS_refractory_window_ms * sampling_rate / 1000.0))
-            
-            # wavelet-derived guard (from calc_wavelet_dynamic_offset), then cap via config
-            post_qrs_guard = int(offset_samples) if "offset_samples" in locals() else 0
-            cap_samples    = int(round(cfg.wavelet_guard_cap_ms * sampling_rate / 1000.0))
-            post_qrs_guard = max(0, min(post_qrs_guard, cap_samples))
-            
+
+            # wavelet-derived guard (from calc_wavelet_dynamic_offset), then cap via config.
+            # Mouse preset sets t_ignore_wavelet_guard so the compact post-S gap is used.
+            if getattr(cfg, "t_ignore_wavelet_guard", False):
+                post_qrs_guard = 0
+            else:
+                post_qrs_guard = int(offset_samples) if "offset_samples" in locals() else 0
+                cap_samples = int(round(cfg.wavelet_guard_cap_ms * sampling_rate / 1000.0))
+                post_qrs_guard = max(0, min(post_qrs_guard, cap_samples))
+
             t_start_idx = min(max(int(t_region_start) + 1 + max(gap, post_qrs_guard), 0), n - 2)
-            t_end_idx   = max(
+            end_margin_ms = getattr(cfg, "t_end_margin_ms", None)
+            if end_margin_ms is None:
+                end_margin_ms = cfg.detrend_window_ms / 2.0
+            t_end_idx = max(
                 t_start_idx + 2,
-                n - int(round((cfg.detrend_window_ms / 2.0) * sampling_rate / 1000.0)),
+                n - int(round(float(end_margin_ms) * sampling_rate / 1000.0)),
             )
 
             if t_end_idx - t_start_idx < 3:
