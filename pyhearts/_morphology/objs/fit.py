@@ -148,34 +148,44 @@ class PyHEARTS:
         notch_frequency: Optional[float] = None,
         quality_factor: Optional[float] = None,
         poly_degree: Optional[int] = None,
-    ) -> Optional[np.ndarray]:
+        max_nan_frac: float = 0.01,
+    ) -> np.ndarray:
         """
         Preprocess an ECG signal.
-    
-        Applies optional high-pass, low-pass, and notch filters, as well as polynomial detrending,
-        to remove baseline wander, noise, and line interference from the input ECG signal.
-    
+
+        Applies optional high-pass, low-pass, and notch filters, as well as
+        polynomial detrending, to remove baseline wander, noise, and line
+        interference from the input ECG signal. Column/row vectors are coerced
+        to 1-D. Errors raise instead of returning ``None``.
+
         Parameters
         ----------
-        ecg_signal : np.ndarray
-            Raw ECG signal array (in mV).
+        ecg_signal : array-like
+            Raw ECG signal (mV). Must be 1-D or a column/row vector.
         highpass_cutoff : float, optional
-            High-pass filter cutoff frequency in Hz. If None, no high-pass filtering is applied.
+            High-pass cutoff in Hz. Requires ``filter_order`` when set.
         filter_order : int, optional
-            Order of the digital filter. If None, uses the default in `preprocess_ecg`.
+            Butterworth order. Required when either band cutoff is set.
         lowpass_cutoff : float, optional
-            Low-pass filter cutoff frequency in Hz. If None, no low-pass filtering is applied.
+            Low-pass cutoff in Hz. Requires ``filter_order`` when set.
         notch_frequency : float, optional
-            Notch filter center frequency in Hz (e.g., 50 or 60 for mains noise). If None, no notch is applied.
+            Notch center frequency in Hz (e.g. 50 or 60). Requires ``quality_factor``.
         quality_factor : float, optional
-            Quality factor for the notch filter. Ignored if `notch_frequency` is None.
+            Notch quality factor. Required when ``notch_frequency`` is set.
         poly_degree : int, optional
-            Degree of polynomial detrending to apply. If None, no polynomial detrending is applied.
-    
+            Polynomial detrending degree. If None, skipped.
+        max_nan_frac : float, default 0.01
+            Max NaN fraction to linearly interpolate; above this, raises.
+
         Returns
         -------
-        np.ndarray or None
-            Preprocessed ECG signal, or None if preprocessing fails.
+        np.ndarray
+            Preprocessed 1-D ECG signal.
+
+        Raises
+        ------
+        ValueError
+            On invalid shape, unpaired filter arguments, or excessive NaNs.
         """
         return preprocess_ecg(
             ecg_signal,
@@ -186,6 +196,7 @@ class PyHEARTS:
             notch_frequency,
             quality_factor,
             poly_degree,
+            max_nan_frac,
         )
 
     def initialize_output_dict(

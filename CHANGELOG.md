@@ -27,6 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ~62% to ~75%+ without changing the record-T search itself.
 
 ### Fixed
+- Harden `preprocess_ecg` / `preprocess_signal`: coerce column/row vectors to
+  1-D, require paired filter args (`filter_order` with band cutoffs;
+  `quality_factor` with `notch_frequency`), interpolate sparse NaNs
+  (≤ `max_nan_frac`), and raise on failure instead of printing and returning
+  `None`.
 - Clip Gaussian `curve_fit` initial guesses into their parameter bounds before
   SciPy `trf` (`clip_guess_to_bounds`). CASE 2 previously passed raw `p0`, so
   tight `bound_factor` values produced mass "Initial guess is outside of
