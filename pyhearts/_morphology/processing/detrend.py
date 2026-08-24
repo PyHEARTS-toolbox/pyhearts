@@ -1,7 +1,6 @@
 from typing import Optional, Tuple
 import numpy as np
 from scipy.stats import linregress
-from pyhearts._morphology.plts import plot_detrended_cycle  # Importing PyHEARTS plot function
 
 
 def detrend_signal(
@@ -69,6 +68,8 @@ def detrend_signal(
 
     # --- Plotting ---
     if plot:
+        from pyhearts._morphology.plts import plot_detrended_cycle
+
         plot_detrended_cycle(xs, signal, detrended_signal, cycle)
 
     return detrended_signal, slope

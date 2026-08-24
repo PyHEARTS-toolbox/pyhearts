@@ -5,7 +5,6 @@ from typing import Optional, Union
 import numpy as np
 from scipy.signal import find_peaks
 
-from pyhearts._morphology import plts as _morph_plts
 from pyhearts._morphology.config import ProcessCycleConfig
 
 
@@ -165,6 +164,8 @@ def r_peak_detection(
 
     # ----- Optional plotting (original polarity) -----
     if plot:
+        from pyhearts._morphology import plts as _morph_plts
+
         if plot_start is not None and plot_end is not None:
             if plot_start < 0 or plot_end <= plot_start:
                 raise ValueError("`plot_end` must be > `plot_start` and both ≥ 0.")

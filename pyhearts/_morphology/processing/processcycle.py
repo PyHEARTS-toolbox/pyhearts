@@ -10,7 +10,6 @@ from scipy.optimize import curve_fit
 from pyhearts._morphology.config import ProcessCycleConfig
 from pyhearts._morphology.feature import calc_intervals, interval_ms, extract_shape_features
 from pyhearts._morphology.fitmetrics import calc_r_squared, calc_rmse
-from pyhearts._morphology.plts import plot_fit, plot_labeled_peaks, plot_rise_decay
 from .bounds import calc_bounds, clip_guess_to_bounds
 from .detrend import detrend_signal
 from .gaussian import compute_gauss_std, gaussian_function
@@ -627,6 +626,8 @@ def process_cycle(
         fit = gaussian_function(xs_rel_idxs, *gaussian_features_to_use)
        
         if plot:
+            from pyhearts._morphology.plts import plot_fit
+
             plot_fit(xs_rel_idxs, sig_detrended, fit)
         if verbose:
             print(f"[Cycle {cycle_idx}]: Fit generation complete.")
@@ -735,6 +736,8 @@ def process_cycle(
         }
 
         if plot:
+            from pyhearts._morphology.plts import plot_labeled_peaks
+
             plot_labeled_peaks(xs_rel_idxs, sig_detrended, peak_data)
 
     #########################################################################################################
@@ -819,6 +822,8 @@ def process_cycle(
             peak_data[comp]["ri_ms"] = np.nan
     
     if plot:
+        from pyhearts._morphology.plts import plot_rise_decay
+
         plot_rise_decay(
             xs=xs_rel_idxs,
             sig=sig_detrended,

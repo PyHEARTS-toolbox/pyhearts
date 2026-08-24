@@ -15,7 +15,7 @@ See the package README and ``docs/PRESETS.md`` for install and preset details.
 """
 
 # Submodules
-from . import feature, io, plots, processing
+from . import feature, io, processing
 
 # Core classes
 from .core.analyzer import PyHEARTS
@@ -29,14 +29,7 @@ from .io import (
 )
 from .version import __version__
 
-# Signal generation (optional - requires neurokit2 which needs Python 3.10+)
-try:
-    from .sim import generate_ecg_signal
-
-    _HAS_SIM = True
-except (ImportError, TypeError):
-    generate_ecg_signal = None  # type: ignore[assignment, misc]
-    _HAS_SIM = False
+_HAS_SIM: bool | None = None
 
 __all__ = [
     # Version
@@ -56,3 +49,27 @@ __all__ = [
     "plots",
     "processing",
 ]
+
+
+def __getattr__(name: str):
+    """Lazy-load optional heavy submodules (plots / sim) until accessed."""
+    global _HAS_SIM
+
+    if name == "plots":
+        import importlib
+
+        return importlib.import_module(".plots", __name__)
+
+    if name == "generate_ecg_signal":
+        try:
+            from .sim import generate_ecg_signal as _generate_ecg_signal
+        except (ImportError, TypeError):
+            _HAS_SIM = False
+            globals()["generate_ecg_signal"] = None
+            return None
+        _HAS_SIM = True
+        globals()["generate_ecg_signal"] = _generate_ecg_signal
+        return _generate_ecg_signal
+
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+

@@ -3,11 +3,7 @@ import numpy as np
 import pandas as pd
 from scipy.signal import detrend, find_peaks
 import pywt
-from pyhearts._morphology.config import ProcessCycleConfig   
-
-
-from pyhearts._morphology.plts import plot_epochs
-
+from pyhearts._morphology.config import ProcessCycleConfig
 
 
 def epoch_ecg(
@@ -199,6 +195,8 @@ def epoch_ecg(
 
     # --- Plot (use the x-axis from the first kept cycle) ---
     if plot:
+        from pyhearts._morphology.plts import plot_epochs
+
         plot_epochs(kept_cycles, kept_metadata[0]["x_vals"])
 
     epochs_df = pd.DataFrame(epochs_rows, columns=["signal_x", "signal_y", "index", "cycle"])
