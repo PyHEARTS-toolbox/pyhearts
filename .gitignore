@@ -115,12 +115,8 @@ raw_data/
 results/
 benchmark_results/
 
-# Held-out validation: keep lockfiles + protocol; ignore bulky run products
-validation/output/
-!validation/
-!validation/**/*.py
-!validation/**/*.md
-!validation/config_frozen*.json
+# Held-out validation (local-only; not shipped in the toolbox)
+validation/
 
 # Archived July 2026 ensemble investigation and related non-mainline notes
 documentation/
@@ -257,7 +253,6 @@ investigate_*.py
 plot_*.py
 regenerate_*.py
 run_*.py
-!validation/run_*.py
 test_original_*.py
 test_sel*.py
 test_ecgpuwave_*.py
@@ -315,7 +310,7 @@ tests/archive/
 # Example analysis outputs
 examples/output/
 
-# Local-only extras (research harnesses, parked validation, WIP notes) —
+# Local-only extras (research harnesses, WIP notes) —
 # keep on disk; do not ship in the toolbox core.
 docs/OUTPUT_VARIABLES.md
 examples/eval_qtdb_pt_toggles.py
@@ -324,6 +319,3 @@ examples/qtdb_peak_variability_analysis.py
 examples/sim_rpeak_harness.py
 examples/sim_rpeak_high_value.py
 examples/sim_rpeak_noise_sweep.py
-validation/ludb_rpeak_mechanism_and_prominence.py
-validation/rpeak_detection_window_spec_v1.json
-validation/parked/
