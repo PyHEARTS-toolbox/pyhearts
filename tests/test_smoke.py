@@ -29,7 +29,7 @@ def test_default_config_instantiates():
 def test_human_species_uses_unified_pipeline():
     analyzer = PyHEARTS(sampling_rate=500.0, species="human")
     assert analyzer.pipeline_version == "morphology-record-t"
-    assert analyzer.cfg.version == "v1-human"
+    assert analyzer.cfg.version == "v1-fitbounds-clip-human"
     assert analyzer.apply_record_t is True
 
 
