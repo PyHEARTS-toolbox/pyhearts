@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `reconstruct_ecg`: rebuild a global ECG timeseries from per-beat Gaussian
+  morphology (P/Q/R/S/T μ, height, σ, with voltage / FWHM / rise–decay
+  fallbacks), placing components on sample index (and `time_ms`). Residual
+  noise is taken from the original recording when provided, or synthesized
+  from per-cycle `rmse`. Also available as `analyzer.reconstruct_ecg()`.
+  Example walkthrough: `examples/reconstruct_ecg.ipynb`.
 - Morphology R-peak auto-polarity: inverted QRS / lead polarity is detected
   (`detect_signal_polarity`) and the analysis trace is uprighted before peak
   finding and morphology / record-T. Disable with `rpeak_auto_polarity=False`.
@@ -27,6 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ~62% to ~75%+ without changing the record-T search itself.
 
 ### Fixed
+- Morphology Gaussian warm-start: if a prior beat is missing any of P/Q/R/S/T,
+  re-run full peak search (`reseed_missing_components`, default on) so a miss
+  on beat 0 cannot lock that wave out of the rest of the recording. Mouse T
+  reseed (`t_reseed_if_missing`) is unchanged.
 - Harden `preprocess_ecg` / `preprocess_signal`: coerce column/row vectors to
   1-D, require paired filter args (`filter_order` with band cutoffs;
   `quality_factor` with `notch_frequency`), interpolate sparse NaNs

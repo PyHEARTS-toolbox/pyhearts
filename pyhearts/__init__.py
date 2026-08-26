@@ -9,7 +9,9 @@ Typical workflow
 1. ``analyzer = PyHEARTS(sampling_rate=..., species="human")``
 2. Optionally preprocess with ``analyzer.preprocess_signal(...)``
 3. ``features, cycles = analyzer.analyze_ecg(ecg)``
-4. Optionally ``analyzer.save_output(file_id, results_dir)``
+4. Optionally ``recon = analyzer.reconstruct_ecg()`` to rebuild the ECG
+   from fitted Gaussians
+5. Optionally ``analyzer.save_output(file_id, results_dir)``
 
 See the package README and ``docs/PRESETS.md`` for install and preset details.
 """
@@ -19,6 +21,7 @@ from . import feature, io, processing
 
 # Core classes
 from .core.analyzer import PyHEARTS
+from .processing.reconstruct import ReconstructedECG, reconstruct_ecg
 
 # I/O helpers
 from .io import (
@@ -36,6 +39,9 @@ __all__ = [
     "__version__",
     # Core
     "PyHEARTS",
+    # Reconstruction
+    "ReconstructedECG",
+    "reconstruct_ecg",
     # I/O
     "load_monitor_csv",
     "load_wfdb_signal",

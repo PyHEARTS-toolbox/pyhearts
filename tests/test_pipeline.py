@@ -113,6 +113,7 @@ def test_human_t_search_defaults_unchanged():
     analyzer = PyHEARTS(sampling_rate=500.0, species="human")
     assert analyzer.apply_record_t is True
     assert analyzer.cfg.t_reseed_if_missing is False
+    assert analyzer.cfg.reseed_missing_components is True
     assert analyzer.cfg.t_ignore_wavelet_guard is False
     assert analyzer.cfg.t_height_above_baseline is False
     assert analyzer.cfg.t_end_margin_ms is None

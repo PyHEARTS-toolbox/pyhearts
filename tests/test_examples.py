@@ -12,6 +12,7 @@ NOTEBOOKS = (
     EXAMPLES / "demo.ipynb",
     EXAMPLES / "intro_overview.ipynb",
     EXAMPLES / "profile_pipeline_speed.ipynb",
+    EXAMPLES / "reconstruct_ecg.ipynb",
 )
 
 

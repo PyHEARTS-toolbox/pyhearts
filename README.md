@@ -103,6 +103,7 @@ Runnable notebooks:
 
 - `examples/demo.ipynb` — shortest end-to-end demo
 - `examples/intro_overview.ipynb` — feature/plot walkthrough
+- `examples/reconstruct_ecg.ipynb` — Gaussian reconstruction vs original, with quality plots
 - `examples/profile_pipeline_speed.ipynb` — runtime profiling
 
 ## What you get
@@ -121,6 +122,31 @@ Important T-wave columns:
 
 Gaussian reconstruction metrics (`r_squared`, `rmse`, `T_gauss_*`) remain tied
 to the morphology fit.
+
+## Reconstructing the ECG
+
+`reconstruct_ecg` (also `analyzer.reconstruct_ecg()`) evaluates each beat's
+fitted P/Q/R/S/T Gaussians on the recording's sample index so relative beat
+timing matches `*_global_center_idx` / `*_center_ms`. When the original ECG
+is supplied, the residual (`original − gaussian`) is captured as noise and
+added back by default:
+
+```python
+from pyhearts import PyHEARTS, reconstruct_ecg
+
+features, cycles = analyzer.analyze_ecg(filtered)
+recon = analyzer.reconstruct_ecg()  # uses the analysis trace for residual noise
+# or, from a saved feature table:
+recon = reconstruct_ecg(features, analyzer.sampling_rate, original=filtered, cycles=cycles)
+
+recon.gaussian   # clean sum of Gaussians
+recon.noise      # residual of the original (or RMSE-synthesized)
+recon.signal     # gaussian + noise
+recon.time_ms    # x-axis in milliseconds; recon.index is samples
+```
+
+For T, the morphology center `T_gaussian_global_center_idx` is used rather
+than the record-level `T_global_center_idx`.
 
 ## Configuration
 

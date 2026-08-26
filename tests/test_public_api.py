@@ -26,4 +26,6 @@ def test_public_exports_exist():
     assert hasattr(pyhearts, "plots")
     assert not hasattr(pyhearts, "fitmetrics")
     assert hasattr(pyhearts, "io")
+    assert hasattr(pyhearts, "reconstruct_ecg")
+    assert hasattr(pyhearts, "ReconstructedECG")
     assert pyhearts.PyHEARTS is CorePyHEARTS

@@ -60,6 +60,9 @@ class ProcessCycleConfig:
     t_ignore_wavelet_guard: bool = False
     t_end_margin_ms: Optional[float] = None  # None → detrend_window_ms / 2
     t_reseed_if_missing: bool = False  # if True, CASE1 skipped when prior fit lacks T
+    # If the prior fit is missing any of P/Q/R/S/T, skip CASE 1 (warm-start) so
+    # a miss on beat 0 cannot lock later beats out of that component.
+    reseed_missing_components: bool = True
     t_height_above_baseline: bool = False  # score T as peak − local median (S recovery)
     
      # ----- Curve-fit -----

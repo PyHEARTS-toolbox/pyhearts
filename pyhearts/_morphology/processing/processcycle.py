@@ -72,17 +72,27 @@ def process_cycle(
         and isinstance(previous_gauss_features, dict)
         and len(previous_gauss_features) > 0
     )
-    # Mouse (and any preset with t_reseed_if_missing): if the prior fit dropped T,
-    # fall through to CASE 2 so T can be re-seeded instead of locking PQRS-only.
-    if (
-        use_previous
-        and getattr(cfg, "t_reseed_if_missing", False)
-        and "T" not in previous_gauss_features
-    ):
+    # Warm-start only refits labels already in previous_gauss_features. If the
+    # prior beat dropped a wave (e.g. Q on beat 0), later beats must re-run
+    # CASE 2 peak search or that component stays locked out for the record.
+    expected_gauss_components = ("P", "Q", "R", "S", "T")
+    missing_prior = (
+        [c for c in expected_gauss_components if c not in previous_gauss_features]
+        if use_previous
+        else []
+    )
+    reseed_missing = bool(getattr(cfg, "reseed_missing_components", True)) and bool(
+        missing_prior
+    )
+    reseed_t = (
+        bool(getattr(cfg, "t_reseed_if_missing", False)) and "T" in missing_prior
+    )
+    if use_previous and (reseed_missing or reseed_t):
         if verbose:
+            why = "reseed_missing_components" if reseed_missing else "t_reseed_if_missing"
             print(
-                f"[Cycle {cycle_idx}]: Prior fit lacks T; reseeding morphology "
-                f"(t_reseed_if_missing=True)."
+                f"[Cycle {cycle_idx}]: Prior fit lacks {missing_prior}; "
+                f"reseeding morphology ({why}=True)."
             )
         use_previous = False
 

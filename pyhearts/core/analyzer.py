@@ -21,6 +21,7 @@ from pyhearts._morphology import (
 )
 from pyhearts.config import ProcessCycleConfig
 from pyhearts.processing.delineation_signal import prepare_record_delineation_signal
+from pyhearts.processing.reconstruct import ReconstructedECG, reconstruct_ecg
 from pyhearts.processing.record_delineation import (
     _local_rr_samples,
     _resolve_t_guess,
@@ -452,6 +453,73 @@ class PyHEARTS(_CorePyHEARTS):
             json.dumps(metadata, indent=2, default=str)
         )
         return output_path
+
+    def reconstruct_ecg(
+        self,
+        original: np.ndarray | None = None,
+        *,
+        add_noise: bool = True,
+        noise_mode: str = "residual",
+        gate_edges: bool = False,
+        n_samples: int | None = None,
+        rng: np.random.Generator | int | None = None,
+    ) -> ReconstructedECG:
+        """Rebuild a global ECG from the latest Gaussian morphology table.
+
+        Requires a prior :meth:`analyze_ecg` call. Each P/Q/R/S/T component is
+        evaluated as a symmetric Gaussian and placed on the recording's sample
+        index (with ``time_ms`` alongside). Residual noise is taken from
+        ``original`` when provided, otherwise from the polarity-corrected
+        analysis trace when that is stored on the instance.
+
+        Parameters
+        ----------
+        original
+            Optional 1-D ECG for residual noise. Defaults to
+            ``analysis_ecg`` when available (the polarity-corrected trace
+            actually fitted).
+        add_noise
+            If True, ``result.signal`` is Gaussian mixture plus residual.
+        noise_mode
+            ``"residual"``, ``"isoelectric"``, or ``"rmse"``. See
+            :func:`~pyhearts.processing.reconstruct.reconstruct_ecg`.
+        gate_edges
+            If True, taper each Gaussian at stored onset/offset. Default
+            False matches the ungated morphology fit.
+        n_samples
+            Output length. Defaults to the original/analysis trace length.
+        rng
+            Seed or generator used only for RMSE / isoelectric synthesis.
+
+        Returns
+        -------
+        ReconstructedECG
+            Global-axis Gaussian mixture, captured noise, and reconstructed
+            signal.
+
+        Raises
+        ------
+        RuntimeError
+            If :meth:`analyze_ecg` has not produced a feature table.
+        """
+        features = getattr(self, "output_df", None)
+        if features is None or (isinstance(features, pd.DataFrame) and features.empty):
+            raise RuntimeError("Call analyze_ecg before reconstruct_ecg")
+
+        if original is None:
+            original = getattr(self, "analysis_ecg", None)
+
+        return reconstruct_ecg(
+            features,
+            float(self.sampling_rate),
+            original=None if original is None else np.asarray(original, dtype=float),
+            cycles=getattr(self, "epochs_df", None),
+            n_samples=n_samples,
+            add_noise=add_noise,
+            noise_mode=noise_mode,
+            gate_edges=gate_edges,
+            rng=rng,
+        )
 
 
 __all__ = [
