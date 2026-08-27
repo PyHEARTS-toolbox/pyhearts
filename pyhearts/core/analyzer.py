@@ -165,7 +165,7 @@ def merge_record_t(
     ``T_global_center_idx`` into ``T_gaussian_global_center_idx``, then
     overwrites only ``T_global_center_idx`` from nearest-matched record-T pairs.
 
-    Optional post-merge fusion with the preserved Gaussian T (LUDB-motivated):
+    Optional post-merge fusion with the preserved Gaussian T:
 
     * ``fallback_gaussian_on_miss`` — if record-T is NaN, restore Gaussian.
     * ``prefer_later_gaussian_ms`` — if both finite and Gaussian is later by at

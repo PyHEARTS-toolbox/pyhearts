@@ -270,7 +270,7 @@ class ProcessCycleConfig:
     soft_t_rt_late_preference: float = 0.25
     soft_t_rt_use_mid_tp_window: bool = True  # open w1 to mid(T,P) so late apex is reachable
     # After record-T merge: restore Gaussian T on miss; if both finite and Gaussian is
-    # later by ≥ this many ms, prefer Gaussian (LUDB near-misses are systematically early).
+    # later by ≥ this many ms, prefer Gaussian (record-T near-misses are often early).
     record_t_fallback_gaussian_on_miss: bool = False
     record_t_prefer_later_gaussian_ms: float = 0.0  # 0 = disabled
     record_qs_search_window_ms: float = 150.0

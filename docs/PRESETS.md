@@ -59,9 +59,7 @@ There is no skewed-Gaussian runtime option.
 ## QTDB annotation policy (development / benchmark)
 
 QTDB is a **development and benchmark** corpus (including the Dec 2024 default
-re-tune), not a held-out validation set for current public defaults. Held-out
-morphology evaluation uses LUDB with a frozen config — see
-``validation/README.md``.
+re-tune), not a held-out validation set for current public defaults.
 
 The manual QTDB morphology reference uses ECG1 (channel 0) with the ``q1c``
 cardiologist annotations. Treat these marks as a **reference** (report against

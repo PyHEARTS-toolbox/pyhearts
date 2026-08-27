@@ -118,6 +118,11 @@ benchmark_results/
 # Held-out validation (local-only; not shipped in the toolbox)
 validation/
 
+# LUDB corpus and local held-out notes (not shipped)
+data/ludb/
+**/ludb/
+**/*ludb*
+
 # Archived July 2026 ensemble investigation and related non-mainline notes
 documentation/
 reviewer_response_updated.md
