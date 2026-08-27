@@ -111,8 +111,11 @@ Runnable notebooks:
 Each call to `analyze_ecg` returns:
 
 - **features** — one row per cardiac cycle (fiducials, Gaussian morphology,
-  intervals, fit quality; typically ~136 columns)
+  intervals, fit quality; 136 named columns plus `cycle_index`)
 - **cycles** — segmented per-beat waveform samples
+
+The full feature set (names, families, and calculations) is
+`docs/OUTPUT_VARIABLES.md`.
 
 Important T-wave columns:
 

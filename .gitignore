@@ -312,7 +312,6 @@ examples/output/
 
 # Local-only extras (research harnesses, WIP notes) —
 # keep on disk; do not ship in the toolbox core.
-docs/OUTPUT_VARIABLES.md
 examples/eval_qtdb_pt_toggles.py
 examples/qtdb_morphology_reference.py
 examples/qtdb_peak_variability_analysis.py

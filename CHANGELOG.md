@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Track `docs/OUTPUT_VARIABLES.md` as the canonical per-cycle / HRV feature
+  set (names, families, and calculations).
 - `reconstruct_ecg`: rebuild a global ECG timeseries from per-beat Gaussian
   morphology (P/Q/R/S/T μ, height, σ, with voltage / FWHM / rise–decay
   fallbacks), placing components on sample index (and `time_ms`). Residual
