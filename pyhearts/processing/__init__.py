@@ -1,6 +1,5 @@
 """Record-level delineation, record-T helpers, and Gaussian reconstruction."""
 
-from .cycle_feature_refresh import refresh_cycles_after_timing_update
 from .delineation_signal import prepare_record_delineation_signal
 from .record_delineation import (
     build_record_beat_template,
@@ -15,5 +14,4 @@ __all__ = [
     "prepare_record_delineation_signal",
     "reconstruct_cycle",
     "reconstruct_ecg",
-    "refresh_cycles_after_timing_update",
 ]

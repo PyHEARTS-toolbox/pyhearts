@@ -46,7 +46,8 @@ def calc_bounds(
     height: float,
     std: int,
     bound_factor: float,
-    flip_height: bool = False
+    flip_height: bool = False,
+    height_cap: float | None = None,
 ) -> Tuple[List[Union[int, float]], List[Union[int, float]]]:
     """
     Calculate lower and upper bounds for a Gaussian component's features: 
@@ -67,6 +68,9 @@ def calc_bounds(
         Proportion to scale bounds around each feature (default is 0.2).
     flip_height : bool, optional
         If True, reverses direction of height bounds (for negative peaks).
+    height_cap : float, optional
+        If given, height bounds are clamped to [-height_cap, height_cap], so that a
+        warm-started amplitude cannot grow beyond the current cycle's amplitude scale.
 
     Returns
     -------
@@ -102,22 +106,22 @@ def calc_bounds(
     elif lower_height > upper_height:
         lower_height, upper_height = upper_height, lower_height
 
+    # --- Height cap (amplitude scale of the current cycle) ---
+    if height_cap is not None and np.isfinite(height_cap) and height_cap > 0:
+        lower_height = max(lower_height, -height_cap)
+        upper_height = min(upper_height, height_cap)
+        if upper_height <= lower_height:  # seed beyond the cap: keep a minimal interval at the cap
+            if height >= 0:
+                lower_height, upper_height = height_cap * factor_low, height_cap
+            else:
+                lower_height, upper_height = -height_cap, -height_cap * factor_low
+
     # --- Std bounds ---
-    lower_std = max(int(std * factor_low), 1)
-    upper_std = int(std * factor_high)
-
-    # Enforce wider bounds for very small std values
-    if std < 2:
-        lower_std = 1
-        upper_std = 5  # ensures upper - lower = 4
-
-    # General case: Ensure lower_std < upper_std and a minimum width
-    elif lower_std >= upper_std or (upper_std - lower_std < 1):
-        if lower_std == 1:
-            upper_std = max(upper_std, 2)
-        else:
-            lower_std = max(lower_std - 1, 1)
-            upper_std = lower_std + 1
+    # Kept unrounded. Rounding down (int(std * factor_high)) made sigma <= 4 samples an
+    # absorbing state: the upper bound equalled sigma, so a warm-started fit could shrink
+    # a wave's sigma beat by beat but never let it grow back (seen on long recordings).
+    lower_std = max(float(std) * factor_low, 1.0)
+    upper_std = max(float(std) * factor_high, lower_std + 1.0)
 
     return [center_lower, lower_height, lower_std], [center_upper, upper_height, upper_std]
 

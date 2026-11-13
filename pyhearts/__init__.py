@@ -17,7 +17,7 @@ See the package README and ``docs/PRESETS.md`` for install and preset details.
 """
 
 # Submodules
-from . import feature, io, processing
+from . import feature, io, processing, standard
 
 # Core classes
 from .core.analyzer import PyHEARTS

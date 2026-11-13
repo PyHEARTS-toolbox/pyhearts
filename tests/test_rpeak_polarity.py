@@ -58,8 +58,8 @@ def test_r_peak_detection_recovers_inverted_lead():
     cfg = ProcessCycleConfig.for_human()
     tol = int(round(40.0 * fs / 1000.0))
 
-    peaks_up = r_peak_detection(upright, fs, cfg=cfg)
-    peaks_inv = r_peak_detection(inverted, fs, cfg=cfg)
+    peaks_up = r_peak_detection(upright, fs, cfg=cfg, auto_polarity=True)
+    peaks_inv = r_peak_detection(inverted, fs, cfg=cfg, auto_polarity=True)
 
     assert _match_rate(ref, peaks_up, tol) >= 0.95
     assert _match_rate(ref, peaks_inv, tol) >= 0.95
@@ -77,3 +77,9 @@ def test_r_peak_auto_polarity_can_be_disabled():
     peaks_on = r_peak_detection(inverted, fs, cfg=cfg, auto_polarity=True)
     assert _match_rate(ref, peaks_on, tol) > _match_rate(ref, peaks_off, tol)
     assert _match_rate(ref, peaks_off, tol) < 0.5
+
+
+def test_human_preset_keeps_lead_polarity():
+    """Human preset: no flip, so R is the positive QRS deflection (lead II convention)."""
+    assert ProcessCycleConfig.for_human().rpeak_auto_polarity is False
+    assert ProcessCycleConfig().rpeak_auto_polarity is True  # species-agnostic default unchanged

@@ -6,14 +6,15 @@ HRV outputs. For threshold and species-specific knobs, see
 
 ## Feature set overview
 
-`analyze_ecg` returns one row per retained cycle. Named columns (136) plus
+`analyze_ecg` returns one row per retained cycle. Named columns (144) plus
 the saved index `cycle_index`:
 
 | Family | Count | Columns |
 |---|---|---|
 | Cycle quality | 3 | `cycle_trend`, `r_squared`, `rmse` |
 | Per-wave morphology | 120 | 24 metrics × P, Q, R, S, T (list below) |
-| Intervals | 8 | `PR_interval_ms`, `PR_segment_ms`, `QRS_interval_ms`, `ST_segment_ms`, `ST_interval_ms`, `QT_interval_ms`, `PP_interval_ms`, `RR_interval_ms` |
+| Wave boundaries | 7 | `QRS_fiducial_global_idx`, `P_onset_global_idx`, `P_offset_global_idx`, `QRS_onset_global_idx`, `QRS_offset_global_idx`, `T_onset_global_idx`, `T_offset_global_idx` |
+| Intervals | 9 | `PR_interval_ms`, `PR_segment_ms`, `QRS_interval_ms`, `ST_segment_ms`, `ST_interval_ms`, `QT_interval_ms`, `P_duration_ms`, `PP_interval_ms`, `RR_interval_ms` |
 | Pairwise voltages | 3 | `R_minus_S_voltage_diff_signed`, `R_minus_P_voltage_diff_signed`, `T_minus_R_voltage_diff_signed` |
 | Record-T extras | 2 | `T_gaussian_global_center_idx`, `t_source` |
 
@@ -22,7 +23,7 @@ Per-wave metrics (each prefixed `P_`, `Q_`, `R_`, `S_`, `T_`):
 `global_center_idx`, `global_le_idx`, `global_ri_idx`, `center_ms`, `le_ms`,
 `ri_ms`, `center_idx`, `le_idx`, `ri_idx`, `gauss_center`, `gauss_height`,
 `gauss_stdev_samples`, `gauss_stdev_ms`, `gauss_fwhm_samples`, `gauss_fwhm_ms`,
-`center_voltage`, `le_voltage`, `ri_voltage`, `duration_ms`, `rise_ms`,
+`center_voltage`, `le_voltage`, `ri_voltage`, `width_ms`, `rise_ms`,
 `decay_ms`, `rdsm`, `sharpness`, `voltage_integral_uv_ms`
 
 Optional record-level HRV (`compute_hrv_metrics`, ≥60 valid RR intervals):
@@ -105,7 +106,7 @@ plain-language description and how it is computed.
 | `P_center_voltage` | P wave amplitude at center (mV) | Detrended signal value at `center_idx` |
 | `P_le_voltage` | P wave amplitude at left edge (mV) | Detrended signal at `le_idx` |
 | `P_ri_voltage` | P wave amplitude at right edge (mV) | Detrended signal at `ri_idx` |
-| `P_duration_ms` | P wave duration (ms) | `(ri_idx − le_idx) × (1000 / fs)`; must exceed species minimum |
+| `P_width_ms` | P wave Gaussian width (ms): span of the 30%-of-height crossings on the fitted wave. A morphology feature, not a clinical duration | `(ri_idx − le_idx) × (1000 / fs)`; must exceed species minimum |
 | `P_rise_ms` | P wave rise time (ms) | `(center_idx − le_idx) × (1000 / fs)` |
 | `P_decay_ms` | P wave decay time (ms) | `(ri_idx − center_idx) × (1000 / fs)` |
 | `P_rdsm` | P wave rise-decay symmetry | `(center_idx − le_idx) / (ri_idx − le_idx)` |
@@ -123,7 +124,7 @@ plain-language description and how it is computed.
 | `Q_center_voltage` | Q wave amplitude at center (mV) | Detrended signal value at `center_idx` |
 | `Q_le_voltage` | Q wave amplitude at left edge (mV) | Detrended signal at `le_idx` |
 | `Q_ri_voltage` | Q wave amplitude at right edge (mV) | Detrended signal at `ri_idx` |
-| `Q_duration_ms` | Q wave duration (ms) | `(ri_idx − le_idx) × (1000 / fs)`; must exceed species minimum |
+| `Q_width_ms` | Q wave Gaussian width (ms): span of the 30%-of-height crossings on the fitted wave. A morphology feature, not a clinical duration | `(ri_idx − le_idx) × (1000 / fs)`; must exceed species minimum |
 | `Q_rise_ms` | Q wave rise time (ms) | `(center_idx − le_idx) × (1000 / fs)` |
 | `Q_decay_ms` | Q wave decay time (ms) | `(ri_idx − center_idx) × (1000 / fs)` |
 | `Q_rdsm` | Q wave rise-decay symmetry | `(center_idx − le_idx) / (ri_idx − le_idx)` |
@@ -141,7 +142,7 @@ plain-language description and how it is computed.
 | `R_center_voltage` | R peak amplitude at center (mV) | Detrended signal value at `center_idx` |
 | `R_le_voltage` | R peak amplitude at left edge (mV) | Detrended signal at `le_idx` |
 | `R_ri_voltage` | R peak amplitude at right edge (mV) | Detrended signal at `ri_idx` |
-| `R_duration_ms` | R peak duration (ms) | `(ri_idx − le_idx) × (1000 / fs)`; must exceed species minimum |
+| `R_width_ms` | R peak Gaussian width (ms): span of the 30%-of-height crossings on the fitted wave. A morphology feature, not a clinical duration | `(ri_idx − le_idx) × (1000 / fs)`; must exceed species minimum |
 | `R_rise_ms` | R peak rise time (ms) | `(center_idx − le_idx) × (1000 / fs)` |
 | `R_decay_ms` | R peak decay time (ms) | `(ri_idx − center_idx) × (1000 / fs)` |
 | `R_rdsm` | R peak rise-decay symmetry | `(center_idx − le_idx) / (ri_idx − le_idx)` |
@@ -159,7 +160,7 @@ plain-language description and how it is computed.
 | `S_center_voltage` | S wave amplitude at center (mV) | Detrended signal value at `center_idx` |
 | `S_le_voltage` | S wave amplitude at left edge (mV) | Detrended signal at `le_idx` |
 | `S_ri_voltage` | S wave amplitude at right edge (mV) | Detrended signal at `ri_idx` |
-| `S_duration_ms` | S wave duration (ms) | `(ri_idx − le_idx) × (1000 / fs)`; must exceed species minimum |
+| `S_width_ms` | S wave Gaussian width (ms): span of the 30%-of-height crossings on the fitted wave. A morphology feature, not a clinical duration | `(ri_idx − le_idx) × (1000 / fs)`; must exceed species minimum |
 | `S_rise_ms` | S wave rise time (ms) | `(center_idx − le_idx) × (1000 / fs)` |
 | `S_decay_ms` | S wave decay time (ms) | `(ri_idx − center_idx) × (1000 / fs)` |
 | `S_rdsm` | S wave rise-decay symmetry | `(center_idx − le_idx) / (ri_idx − le_idx)` |
@@ -177,18 +178,40 @@ plain-language description and how it is computed.
 | `T_center_voltage` | T wave amplitude at center (mV) | Detrended signal value at `center_idx` |
 | `T_le_voltage` | T wave amplitude at left edge (mV) | Detrended signal at `le_idx` |
 | `T_ri_voltage` | T wave amplitude at right edge (mV) | Detrended signal at `ri_idx` |
-| `T_duration_ms` | T wave duration (ms) | `(ri_idx − le_idx) × (1000 / fs)`; must exceed species minimum |
+| `T_width_ms` | T wave Gaussian width (ms): span of the 30%-of-height crossings on the fitted wave. A morphology feature, not a clinical duration | `(ri_idx − le_idx) × (1000 / fs)`; must exceed species minimum |
 | `T_rise_ms` | T wave rise time (ms) | `(center_idx − le_idx) × (1000 / fs)` |
 | `T_decay_ms` | T wave decay time (ms) | `(ri_idx − center_idx) × (1000 / fs)` |
 | `T_rdsm` | T wave rise-decay symmetry | `(center_idx − le_idx) / (ri_idx − le_idx)` |
 | `T_sharpness` | T wave sharpness (normalized) | Same as `P_sharpness` (P95 `\|dV/dt\|` / robust P95−P5 on fitted segment) |
 | `T_voltage_integral_uv_ms` | T wave voltage integral (µV·ms) | Trapezoidal integral of **fitted** mV over inclusive `[le_idx, ri_idx]` with `dx = 1/fs`, × 1e6 |
-| `PR_interval_ms` | PR interval duration (ms) | `(Q_le − P_le) × (1000 / fs)` on relative indices; missing edges imputed from ±3-cycle mean; gated to physiologic limits |
-| `PR_segment_ms` | PR segment duration (ms) | `(Q_le − P_ri) × (1000 / fs)`; imputed / gated as above |
-| `QRS_interval_ms` | QRS duration (ms) | `(S_ri − Q_le) × (1000 / fs)`; imputed / gated as above |
-| `ST_segment_ms` | ST segment duration (ms) | `(T_le − S_ri) × (1000 / fs)`; imputed / gated as above |
-| `ST_interval_ms` | ST interval duration (ms) | `(T_ri − S_ri) × (1000 / fs)`; imputed / gated as above |
-| `QT_interval_ms` | QT interval duration (ms) | `(T_ri − Q_le) × (1000 / fs)`; imputed / gated as above |
+| `QRS_fiducial_global_idx` | Detected R peak / QRS fiducial (absolute sample index) | Detector peak nearest the beat's fitted R (else S, else Q), within 200 ms. Anchors the boundary layer when no R is fitted (e.g. QS complexes) |
+| `P_onset_global_idx`, `P_offset_global_idx` | P wave onset / offset (absolute sample index) | Boundary layer (see below) |
+| `QRS_onset_global_idx`, `QRS_offset_global_idx` | QRS complex onset / offset (absolute sample index) | Boundary layer; QRS delineated as one complex |
+| `T_onset_global_idx`, `T_offset_global_idx` | T wave onset / offset (absolute sample index) | Boundary layer |
+| `PR_interval_ms` | PR interval (ms) | `QRS_onset − P_onset`; NaN outside 50–500 ms |
+| `PR_segment_ms` | PR segment (ms) | `QRS_onset − P_offset`; NaN outside 10–400 ms |
+| `QRS_interval_ms` | QRS duration (ms) | `QRS_offset − QRS_onset`; NaN outside 20–300 ms |
+| `ST_segment_ms` | ST segment (ms) | `T_onset − QRS_offset`; NaN outside 20–500 ms |
+| `ST_interval_ms` | ST interval (ms) | `T_offset − QRS_offset`; NaN outside 5–700 ms |
+| `QT_interval_ms` | QT interval (ms) | `T_offset − QRS_onset`; NaN outside 200–750 ms |
+| `P_duration_ms` | P wave duration (ms) | `P_offset − P_onset`; NaN outside 20–300 ms |
+
+Human preset (lead II): R peaks come from a gradient-threshold detector
+(port of NeuroKit2's default method); the signal is not polarity-flipped, so
+R is always the positive QRS deflection (clinical convention); and the R wave
+is searched within ±50 ms of the detected QRS fiducial, so a T wave taller
+than R, or a QRS without a positive deflection, is never labeled R.
+
+Boundaries and the interval columns above come from
+`pyhearts.processing.boundary_layer` (human and species-agnostic presets):
+a multiscale quadratic-spline wavelet transform at 250 Hz (Martinez et al.
+2004 thresholds), with each beat delineated on its own waveform and P/T
+boundaries checked against a rolling median template of ±10 neighboring
+beats. Missing boundaries stay NaN; nothing is imputed from neighboring
+beats. The mouse preset keeps Gaussian-edge intervals (`(Q_le − P_le)`,
+`(S_ri − Q_le)`, `(T_ri − Q_le)`, etc.), leaves the boundary columns NaN and
+sets `P_duration_ms` equal to `P_width_ms`. The source is recorded in
+`{file_id}_meta.json` under `intervals.source`.
 | `R_minus_S_voltage_diff_signed` | Signed voltage difference R − S | Difference of fitted Gaussian heights: `amp(R) − amp(S)` |
 | `R_minus_P_voltage_diff_signed` | Signed voltage difference R − P | Difference of fitted Gaussian heights: `amp(R) − amp(P)` |
 | `T_minus_R_voltage_diff_signed` | Signed voltage difference T − R | Difference of fitted Gaussian heights: `amp(T) − amp(R)` |

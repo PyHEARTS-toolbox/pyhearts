@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Optional, Union
 
 import numpy as np
+from scipy.ndimage import uniform_filter1d
 from scipy.signal import find_peaks
 
 from pyhearts._morphology.config import ProcessCycleConfig
@@ -97,6 +98,63 @@ def detect_signal_polarity(
     return False
 
 
+def gradient_rpeaks(
+    ecg: np.ndarray,
+    sampling_rate: float,
+    *,
+    smoothwindow: float = 0.1,
+    avgwindow: float = 0.75,
+    gradthreshweight: float = 1.5,
+    minlenweight: float = 0.4,
+    mindelay: float = 0.3,
+) -> np.ndarray:
+    """
+    Gradient-threshold R-peak detector (port of NeuroKit2's default "neurokit" method).
+
+    Port of ``neurokit2.ecg.ecg_findpeaks._ecg_findpeaks_neurokit``
+    (NeuroKit2, MIT License; Makowski et al., Behav. Res. Methods 53:1689-1696,
+    2021) with the same default parameters, producing identical peaks on the
+    same input. QRS regions are where the box-smoothed absolute gradient
+    exceeds ``gradthreshweight`` times its slower moving average; regions
+    shorter than ``minlenweight`` times the mean region length are ignored; the
+    R peak is the most prominent local maximum within each region; peaks closer
+    than ``mindelay`` seconds to the previous peak are dropped (caps the rate at
+    60 / mindelay bpm). Expects an upright, high-passed (>= 0.5 Hz) trace.
+    """
+    signal = np.asarray(ecg, dtype=float)
+    absgrad = np.abs(np.gradient(signal))
+    smooth_kernel = int(np.rint(smoothwindow * sampling_rate))
+    avg_kernel = int(np.rint(avgwindow * sampling_rate))
+    smoothgrad = uniform_filter1d(absgrad, smooth_kernel, mode="nearest")
+    avggrad = uniform_filter1d(smoothgrad, avg_kernel, mode="nearest")
+    gradthreshold = gradthreshweight * avggrad
+    min_delay = int(np.rint(sampling_rate * mindelay))
+
+    qrs = smoothgrad > gradthreshold
+    beg_qrs = np.where(np.logical_and(np.logical_not(qrs[0:-1]), qrs[1:]))[0]
+    end_qrs = np.where(np.logical_and(qrs[0:-1], np.logical_not(qrs[1:])))[0]
+    if len(beg_qrs) == 0:
+        return np.array([], dtype=int)
+    end_qrs = end_qrs[end_qrs > beg_qrs[0]]
+    num_qrs = min(beg_qrs.size, end_qrs.size)
+    if num_qrs == 0:
+        return np.array([], dtype=int)
+    min_len = np.mean(end_qrs[:num_qrs] - beg_qrs[:num_qrs]) * minlenweight
+
+    peaks = [0]
+    for i in range(num_qrs):
+        beg, end = beg_qrs[i], end_qrs[i]
+        if end - beg < min_len:
+            continue
+        locmax, props = find_peaks(signal[beg:end], prominence=(None, None))
+        if locmax.size > 0:
+            peak = beg + locmax[np.argmax(props["prominences"])]
+            if peak - peaks[-1] > min_delay:
+                peaks.append(peak)
+    peaks.pop(0)
+    return np.asarray(peaks, dtype=int)
+
+
 def r_peak_detection(
     ecg: Union[np.ndarray, list[float]],
     sampling_rate: float,
@@ -109,7 +167,11 @@ def r_peak_detection(
     auto_polarity: Optional[bool] = None,
 ) -> np.ndarray:
     """
-    Two-pass, prominence-based R-peak detection driven by config.
+    R-peak detection driven by config.
+
+    ``cfg.rpeak_method == "gradient"``: :func:`gradient_rpeaks` (port of
+    NeuroKit2's default detector). ``"prominence"``: the two-pass
+    prominence-based detector described below.
 
     First-pass uses a fixed refractory (``cfg.rpeak_min_refrac_ms``) to estimate
     RR. Second-pass uses ``cfg.rpeak_rr_frac_second_pass * median(RR)`` as
@@ -136,6 +198,14 @@ def r_peak_detection(
         else False
     )
     ecg_for_peaks = -ecg if is_inverted else ecg
+
+    if getattr(cfg, "rpeak_method", "prominence") == "gradient":
+        final_filtered_r_peaks = gradient_rpeaks(ecg_for_peaks, sampling_rate)
+        if plot:
+            from pyhearts._morphology import plts as _morph_plts
+            _morph_plts.plot_rpeaks(ecg, sampling_rate, final_filtered_r_peaks, crop_ms=crop_ms,
+                                    title="ECG with R-peaks")
+        return final_filtered_r_peaks
 
     # ----- First pass -----
     distance_lo = max(1, int(round(cfg.rpeak_min_refrac_ms * sampling_rate / 1000.0)))

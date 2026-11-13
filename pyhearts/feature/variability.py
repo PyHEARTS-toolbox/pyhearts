@@ -114,10 +114,11 @@ def compute_beat_to_beat_variability(
             "R_gauss_height",
             "P_gauss_height",
             "T_gauss_height",
-            # Wave durations
-            "R_duration_ms",
+            # Wave durations: clinical P duration (boundary layer) and Gaussian widths
             "P_duration_ms",
-            "T_duration_ms",
+            "R_width_ms",
+            "P_width_ms",
+            "T_width_ms",
             # Additional key features
             "QRS_interval_ms",
             "ST_segment_ms",

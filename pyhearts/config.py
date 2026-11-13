@@ -57,7 +57,10 @@ class ProcessCycleConfig:
     r_miss_beat_rr_factor: float = 1.5
     r_trp_on_input_signal: bool = True
 
-    # ----- Epoching thresholds (used in epoch_ecg) -----
+    # ----- Epoching thresholds -----
+    # NOT read by the standard pipeline. Beat epoching runs in the morphology core and uses
+    # pyhearts._morphology.config.ProcessCycleConfig (epoch_corr_thresh 0.80, epoch_var_thresh 5.0).
+    # Kept for backward compatibility of this config object (record-level T settings, t_config).
     # Lowered from 0.80→0.70 to retain more beats with morphological variation
     epoch_corr_thresh: float = 0.70      # min correlation to keep an epoch (0–1)
     epoch_var_thresh: float  = 6.0       # max multiple of global variance allowed (raised from 5.0)
@@ -70,16 +73,9 @@ class ProcessCycleConfig:
     apply_cycle_detrend: bool = False
     # Use global r_peak_detection indices as the R fiducial (refined locally), not argmax(|signal|).
     anchor_r_to_global_detection: bool = True
-    r_anchor_refine_half_window_ms: float = 30.0
-    r_anchor_refine_mode: str = "extremum"
     # Parabolic interpolation for R/P/T peaks; global_center_idx stored as float sample index.
     use_subsample_peak_refinement: bool = True
 
-    # ----- QRS onset (P search boundary) -----
-    qrs_onset_search_window_ms: float = 120.0
-    qrs_onset_fallback_offset_ms: float = 80.0
-    qrs_onset_max_before_r_ms: float = 200.0
-    qrs_onset_min_before_r_ms: float = 30.0
     p_use_unified_qrs_onset: bool = True
 
     # ----- T-wave apex localization (derivative detector) -----
@@ -120,21 +116,12 @@ class ProcessCycleConfig:
     record_delineation_rr_scale_bounds: Tuple[float, float] = (0.85, 1.25)
     record_delineation_replace_p: bool = True
     record_delineation_overwrite_existing_p: bool = False
-    record_delineation_replace_t: bool = True
-    record_delineation_overwrite_existing_t: bool = False
-    record_delineation_replace_t_if_outlier: bool = True
-    record_delineation_t_outlier_mad: float = 2.5
-    record_delineation_replace_r: bool = False
     record_delineation_p_search_before_r_ms: float = 200.0
     record_delineation_p_search_end_before_r_ms: float = 40.0
     record_delineation_t_search_after_r_ms: float = 100.0
     record_delineation_t_search_end_ms: float = 450.0
-    record_delineation_refresh_features: bool = True
-    record_delineation_refresh_shape: bool = True
     # Sprint 1: map P/T on every R (record-T + template fallback when search misses)
-    record_delineation_map_all_beats: bool = False
     record_delineation_map_p_even_if_finite: bool = False
-    record_delineation_map_t_even_if_finite: bool = False
     record_delineation_template_fallback: bool = True
     # Rahul-first: record-T seed before process_cycle (skip post-pass overwrite).
     record_delineation_before_cycles: bool = False
@@ -182,20 +169,12 @@ class ProcessCycleConfig:
     # Never uses per-cycle derivative P/T fallback.
     record_fiducial_miss_policy: str = "template_fallback_then_nan"
     # Sprint 2: adaptive local refine after record-T/template guess
-    record_delineation_refine_always: bool = False
     record_delineation_refine_adaptive: bool = False
     record_delineation_refine_rt_frac: float = 0.05
     record_delineation_refine_ms_max: float = 50.0
     record_refine_p_operator: str = "derivative_apex"
     record_refine_t_operator: str = "derivative_apex"
     record_refine_t_lowpass_hz: float = 40.0
-    # Record local refine signal: record-T guess unchanged; only apex search substrate.
-    # "delineation" = median-baseline delineation trace (SG optional via p_t_search_savgol).
-    # "epoch" = per-cycle ``signal_y`` from epoching (analyzed input segment).
-    # "clinical" = ``clinical_ecg`` slice when provided (export: raw WFDB crop).
-    record_delineation_refine_signal: str = "delineation"
-    # Step A diagnostic: stash record-T guess / refine / S–Q anchors per cycle (export only).
-    record_delineation_t_timing_audit: bool = False
     # Sprint 3: clinical second-pass on raw/epoch trace
     record_clinical_verify: bool = False
     clinical_verify_signal: str = "clinical"
@@ -309,15 +288,9 @@ class ProcessCycleConfig:
     record_t_early_peak_delineation_post_tj_frac: float = 0.04
     record_t_early_peak_rising_edge_frac: float = 0.35  # onset threshold vs window peak
     record_t_early_peak_max_late_from_center_ms: float = 15.0  # cap record-T pick vs projected Tⱼ
-    # When record-T guess exceeds this distance from per-cycle T, keep per-cycle (requires t_wave_use_record_prior)
-    record_t_per_cycle_guardrail_ms: float = 20.0
     # Sprint 4: QRS-energy wavelet coarse P/T priors (record-T/template expected offsets)
     record_wavelet_pt_prior: bool = False
-    record_wavelet_r_std_ms: float = 20.0
-    record_wavelet_t_after_s_ms: float = 20.0
-    record_wavelet_p_before_q_ms: float = 20.0
     record_t_use_savgol: bool = True  # False = record-T apex search on raw delineation segment
-    record_delineation_fill_missing_t: bool = False  # post-pass record-T/template for NaN T
     clinical_verify_t_conditional: bool = False  # T clinical only if RT disputed vs record prior
     clinical_verify_t_dispute_mad_mult: float = 2.5
     clinical_verify_t_dispute_min_ms: float = 50.0
@@ -391,6 +364,9 @@ class ProcessCycleConfig:
     )
 
     # ----- Shape feature thresholds -----
+    # NOT read by the standard pipeline: per-beat shape features come from
+    # pyhearts._morphology.feature.shape with pyhearts._morphology.config (threshold_fraction 0.30).
+    # This value only affects pyhearts.feature.shape.extract_shape_features when called directly.
     # threshold_fraction: Lowered from 0.30→0.20 based on QTDB benchmark
     # PR interval was -74ms biased (P onset detected late)
     # QT interval was -47ms biased (T offset detected early)
@@ -420,7 +396,6 @@ class ProcessCycleConfig:
     t_wave_qrs_post_ms: float = 80.0            # QRS removal: minimum extent after R
 
     # ----- T-wave phase 2: record prior + secondary detector / fusion -----
-    t_wave_use_record_prior: bool = True
     t_wave_use_secondary_detector: bool = True
     t_wave_prior_min_beats: int = 5
     t_wave_prior_window_ms: float = 80.0
@@ -430,8 +405,6 @@ class ProcessCycleConfig:
     t_wave_prior_amp_min_ratio: float = 0.01
     t_wave_fusion_prefer_prior_on_tie: bool = True
 
-    # ----- Lite mode (fast iteration: peaks only, no Gaussian/shape/ST) -----
-    lite_mode: bool = False
 
     # ----- Sharpness (derivative-based; minimal public knobs) -----
     sharp_stat: str = "p95"              # {"mean","median","p95"}
@@ -451,10 +424,6 @@ class ProcessCycleConfig:
         # epoching thresholds
         if not (0.0 <= self.epoch_corr_thresh <= 1.0): raise ValueError("epoch_corr_thresh in [0,1]")
         if self.epoch_var_thresh <= 0: raise ValueError("epoch_var_thresh > 0")
-        if self.r_anchor_refine_half_window_ms <= 0:
-            raise ValueError("r_anchor_refine_half_window_ms > 0")
-        if self.r_anchor_refine_mode not in ("derivative", "extremum"):
-            raise ValueError("r_anchor_refine_mode must be 'derivative' or 'extremum'")
         if self.r_post_detection_refrac_ms <= 0:
             raise ValueError("r_post_detection_refrac_ms > 0")
         if self.r_prp_min_interval_ms <= 0:
@@ -479,12 +448,6 @@ class ProcessCycleConfig:
             raise ValueError("r_miss_beat_rr_factor > 1.0")
         if self.r_detection_method != "derivative":
             raise ValueError("r_detection_method must be 'derivative'")
-        if self.qrs_onset_search_window_ms <= 0:
-            raise ValueError("qrs_onset_search_window_ms > 0")
-        if self.qrs_onset_fallback_offset_ms <= 0:
-            raise ValueError("qrs_onset_fallback_offset_ms > 0")
-        if self.qrs_onset_max_before_r_ms <= self.qrs_onset_min_before_r_ms:
-            raise ValueError("qrs_onset_max_before_r_ms > qrs_onset_min_before_r_ms")
         if self.t_wave_region_expansion_ms < 0:
             raise ValueError("t_wave_region_expansion_ms >= 0")
         if not (0.0 <= self.t_wave_region_min_fraction <= 1.0):
@@ -540,15 +503,6 @@ class ProcessCycleConfig:
                 )
         if self.record_refine_t_lowpass_hz <= 0:
             raise ValueError("record_refine_t_lowpass_hz > 0")
-        if self.record_delineation_refine_signal not in (
-            "delineation",
-            "epoch",
-            "clinical",
-        ):
-            raise ValueError(
-                "record_delineation_refine_signal must be "
-                "'delineation', 'epoch', or 'clinical'"
-            )
         if self.clinical_verify_signal not in ("clinical", "epoch"):
             raise ValueError("clinical_verify_signal must be 'clinical' or 'epoch'")
         if self.clinical_verify_p_window_ms <= 0:
@@ -573,8 +527,6 @@ class ProcessCycleConfig:
         lo_rs, hi_rs = self.record_delineation_rr_scale_bounds
         if not (0.5 <= lo_rs <= hi_rs <= 2.0):
             raise ValueError("record_delineation_rr_scale_bounds in [0.5,2]")
-        if self.record_delineation_t_outlier_mad <= 0:
-            raise ValueError("record_delineation_t_outlier_mad > 0")
         if self.delineation_baseline_method not in ("linear_epoch", "median_record"):
             raise ValueError("delineation_baseline_method must be 'linear_epoch' or 'median_record'")
         w1, w2 = self.delineation_median_baseline_windows_s
@@ -890,7 +842,6 @@ class ProcessCycleConfig:
             p_enable_morphology_validation=False,
             record_delineation=False,
             record_delineation_replace_p=False,
-            record_delineation_replace_t=False,
             record_fiducial_smoothing=False,
             delineation_baseline_method="linear_epoch",
             p_t_search_savgol=True,
@@ -908,7 +859,6 @@ class ProcessCycleConfig:
             r_kurtosis_fraction_of_median=0.55,
             r_miss_beat_rr_factor=1.5,
             r_trp_on_input_signal=True,
-            r_anchor_refine_half_window_ms=30.0,
             t_rt_plausibility_gate=True,
             t_morphology_dominance_check=True,
             p_pr_interval_validation=True,
@@ -940,9 +890,7 @@ class ProcessCycleConfig:
             p_t_threshold_mode="template",
             record_delineation_t_search=True,
             record_delineation_replace_p=True,
-            record_delineation_replace_t=True,
             record_delineation_overwrite_existing_p=False,
-            record_delineation_overwrite_existing_t=True,
             record_template_t_amplitude_norm_sq_frac=(0.15, 0.80),
             record_template_t_morphology_sq_frac=(0.20, 0.60),
             record_t_max_rt_ms=550.0,
@@ -959,10 +907,7 @@ class ProcessCycleConfig:
             record_refine_t_operator="derivative_apex",
             record_template_t_landmark_inverted_peak=True,
             record_template_t_landmark_min_prominence_frac=0.10,
-            t_wave_use_record_prior=False,
             t_wave_use_secondary_detector=False,
-            record_delineation_refresh_features=True,
-            record_delineation_refresh_shape=True,
             record_fiducial_smoothing=True,
             record_qs_search_window_ms=150.0,
             record_s_search_after_r_ms=200.0,
@@ -997,10 +942,7 @@ class ProcessCycleConfig:
         return replace(
             cls.for_human_unified(),
             record_template_prior_windows=True,
-            record_delineation_overwrite_existing_t=False,
-            record_delineation_replace_t=False,
             record_delineation_replace_p=False,
-            record_delineation_map_all_beats=False,
             record_fiducial_smoothing=False,
             version="human-unified-template-prior-phase1",
         )
@@ -1162,12 +1104,8 @@ class ProcessCycleConfig:
         """
         return replace(
             cls._for_human_unified_base(),
-            record_delineation_fill_missing_t=True,
             record_delineation_template_fallback=True,
             record_clinical_verify=False,
-            record_delineation_map_all_beats=False,
-            t_wave_use_record_prior=True,
-            record_t_per_cycle_guardrail_ms=20.0,
             version="human-unified-fill-only",
         )
 

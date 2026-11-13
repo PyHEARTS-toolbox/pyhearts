@@ -253,6 +253,8 @@ def find_asymmetric_bounds_stdguided(
         the component.
     """
     cfg = cfg or ProcessCycleConfig()
+    if not (0 <= center_idx < len(sig)):
+        raise ValueError(f"center_idx {center_idx} outside signal of length {len(sig)}")
 
     thr = cfg.threshold_fraction * height
     # prefer std-guided search; cap by physiologic window if available
@@ -355,6 +357,13 @@ def extract_shape_features(
             continue
 
         approx_center_idx = int(round(center))
+        # A fitted center outside this cycle's window is not a wave in this cycle.
+        # Skip it rather than clamp (clamping would invent an edge at the window
+        # boundary) so the remaining components keep their shape features.
+        if not (0 <= approx_center_idx < len(signal)):
+            if verbose:
+                print(f"[shape] {label}: center {approx_center_idx} outside window of {len(signal)}; skipped")
+            continue
         left_idx, right_idx = find_asymmetric_bounds_stdguided(
             sig=signal,
             center_idx=approx_center_idx,

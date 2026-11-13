@@ -96,6 +96,17 @@ def process_cycle(
             )
         use_previous = False
 
+    # Height cap from the current cycle (cfg.max_height_factor x peak |amplitude|). A warm start whose
+    # carried-over height already exceeds it has drifted; refit this cycle from scratch instead.
+    _peak_abs = float(np.nanmax(np.abs(sig_detrended))) if np.size(sig_detrended) else np.nan
+    height_cap = float(getattr(cfg, "max_height_factor", 1.5)) * _peak_abs if np.isfinite(_peak_abs) and _peak_abs > 0 else None
+    if use_previous and height_cap is not None and any(
+        np.isfinite(v[1]) and abs(float(v[1])) > height_cap for v in previous_gauss_features.values()
+    ):
+        if verbose:
+            print(f"[Cycle {cycle_idx}]: Warm-start height exceeds cap {height_cap:.3f}; refitting from scratch.")
+        use_previous = False
+
     if use_previous:
         if verbose:
             print(f"[Cycle {cycle_idx}]: CASE 1: Previous labeled Gaussian  features found. Using for bounds.")
@@ -120,7 +131,7 @@ def process_cycle(
                 plot=plot,
             )
 
-        bounds = [calc_bounds(center, height, std, bound_factor) for center, height, std in feature_list]
+        bounds = [calc_bounds(center, height, std, bound_factor, height_cap=height_cap) for center, height, std in feature_list]
         lower_bounds, upper_bounds = zip(*bounds)
         bounds = (np.array(lower_bounds).flatten(), np.array(upper_bounds).flatten())
 
@@ -294,7 +305,19 @@ def process_cycle(
                 print(f"[Cycle {cycle_idx}]: sig_detrended is invalid (empty or NaNs). Skipping this cycle.")
             return output_dict, previous_r_global_center_idx, previous_p_global_center_idx, None, None
 
-        r_center_idx = int(np.argmax(sig_detrended))
+        # R search: whole cycle (legacy), or a window around the detected QRS
+        # fiducial (signal_x == 0) so that a beat without a positive QRS
+        # deflection (QS) or with a T wave taller than R never labels T as R.
+        r_half_ms = getattr(cfg, "r_search_half_window_ms", None)
+        sx = one_cycle["signal_x"].to_numpy(dtype=float) if "signal_x" in one_cycle else None
+        has_fiducial = sx is not None and sx.size > 0 and np.nanmin(sx) < 0.0 < np.nanmax(sx)
+        if r_half_ms is not None and has_fiducial:
+            qrs_idx = int(np.argmin(np.abs(sx)))
+            hw = max(1, int(round(r_half_ms * sampling_rate / 1000.0)))
+            lo, hi = max(0, qrs_idx - hw), min(len(sig_detrended), qrs_idx + hw + 1)
+            r_center_idx = lo + int(np.argmax(sig_detrended[lo:hi]))
+        else:
+            r_center_idx = int(np.argmax(sig_detrended))
         r_height = sig_detrended[r_center_idx]
 
         # ------------------------------------------------------
@@ -570,7 +593,7 @@ def process_cycle(
                 print(f"[Cycle {cycle_idx}]: Calculating bounds for Gaussian components...")
 
             bound_factor = cfg.bound_factor 
-            valid_gaus_bounds = [calc_bounds(center, height, std, bound_factor) for center, height, std in valid_guess]
+            valid_gaus_bounds = [calc_bounds(center, height, std, bound_factor, height_cap=height_cap) for center, height, std in valid_guess]
             lower_bounds, upper_bounds = zip(*valid_gaus_bounds)
             bounds = (np.array(lower_bounds).flatten(), np.array(upper_bounds).flatten())
 
@@ -799,7 +822,9 @@ def process_cycle(
         if len(valid_components) == 0:
             if verbose:
                 print(f"[Cycle {cycle_idx}]: No valid components after shape extraction.")
-            return output_dict, previous_r_global_center_idx, previous_p_global_center_idx, sig_detrended, peak_data
+            # Return the Gaussian warm-start state, not peak_data: the next cycle unpacks
+            # (center, height, std) tuples from it, and peak_data holds per-wave dicts.
+            return output_dict, previous_r_global_center_idx, previous_p_global_center_idx, sig_detrended, previous_gauss_features
     
     except Exception as e:
         print(f"[ERROR] [Cycle {cycle_idx}]:  extract_shape_features() failed: {e}")

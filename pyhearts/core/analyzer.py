@@ -20,6 +20,12 @@ from pyhearts._morphology import (
     PyHEARTS as _CorePyHEARTS,
 )
 from pyhearts.config import ProcessCycleConfig
+from pyhearts.processing.boundary_layer import (
+    BOUNDARY_LAYER_VERSION,
+    DEFAULT_PARAMS as DEFAULT_BOUNDARY_PARAMS,
+    BoundaryParams,
+    delineate_boundaries,
+)
 from pyhearts.processing.delineation_signal import prepare_record_delineation_signal
 from pyhearts.processing.reconstruct import ReconstructedECG, reconstruct_ecg
 from pyhearts.processing.record_delineation import (
@@ -32,6 +38,27 @@ from pyhearts.version import __version__
 
 # Algorithm tag recorded in saved metadata (distinct from the package version).
 PIPELINE_VERSION = "morphology-record-t"
+
+WAVES = ("P", "Q", "R", "S", "T")
+QRS_FIDUCIAL_COLUMN = "QRS_fiducial_global_idx"  # detected R peak / QRS fiducial (absolute sample)
+BOUNDARY_COLUMNS = {  # boundary-layer key -> output column (absolute sample index)
+    "P_on": "P_onset_global_idx",
+    "P_off": "P_offset_global_idx",
+    "QRS_on": "QRS_onset_global_idx",
+    "QRS_off": "QRS_offset_global_idx",
+    "T_on": "T_onset_global_idx",
+    "T_off": "T_offset_global_idx",
+}
+# interval column: (start boundary, end boundary, physiological limits in ms)
+LAYER_INTERVALS = {
+    "PR_interval_ms": ("P_on", "QRS_on", (50, 500)),
+    "PR_segment_ms": ("P_off", "QRS_on", (10, 400)),
+    "QRS_interval_ms": ("QRS_on", "QRS_off", (20, 300)),
+    "ST_segment_ms": ("QRS_off", "T_on", (20, 500)),
+    "ST_interval_ms": ("QRS_off", "T_off", (5, 700)),
+    "QT_interval_ms": ("QRS_on", "T_off", (200, 750)),
+    "P_duration_ms": ("P_on", "P_off", (20, 300)),
+}
 
 
 def detect_record_t(
@@ -271,6 +298,7 @@ class PyHEARTS(_CorePyHEARTS):
         plot: bool = False,
         *,
         species: str | None = None,
+        boundary_params: BoundaryParams | None = None,
         **overrides: Any,
     ):
         """
@@ -286,6 +314,10 @@ class PyHEARTS(_CorePyHEARTS):
             If True, enable diagnostic plots during analysis when supported.
         species : {None, "human", "mouse"}, optional
             Morphology/record-T preset selector. See the class docstring.
+        boundary_params : BoundaryParams, optional
+            Settings for the wave-boundary layer that supplies onsets/offsets
+            and the PR, QRS, QT, ST and P-duration columns (human and
+            species-agnostic presets). Defaults to the validated settings.
         **overrides
             Optional morphology-core field overrides forwarded to the
             underlying analyzer. Prefer ``species=`` for normal use.
@@ -317,6 +349,9 @@ class PyHEARTS(_CorePyHEARTS):
         self.apply_record_t = species != "mouse"
         self.last_record_t_stats: dict[str, Any] = {}
         self.pipeline_version = PIPELINE_VERSION
+        self.boundary_params = boundary_params or DEFAULT_BOUNDARY_PARAMS
+        # Mouse beats are too narrow for the 250 Hz wavelet layer (validated on human ECG).
+        self.interval_source = "gaussian_edges" if species == "mouse" else "boundary_layer"
 
     def analyze_ecg(
         self,
@@ -393,11 +428,69 @@ class PyHEARTS(_CorePyHEARTS):
                     getattr(self._t_cfg, "record_t_prefer_later_gaussian_ms", 0.0) or 0.0
                 ),
             )
-            self.output_df = output
-            self.output_dict = output.to_dict(orient="list")
 
+        output = self._apply_boundary_layer(output, np.asarray(ecg_signal, dtype=float))
+        self.output_df = output
+        self.output_dict = output.to_dict(orient="list")
         self.epochs_df = epochs
         return output, epochs
+
+    def _qrs_fiducials(self, output: pd.DataFrame) -> pd.Series:
+        """Detected R peak nearest each beat's fitted QRS waves (R, else S, else Q), within 200 ms."""
+        rp = getattr(self, "r_peak_indices", None)
+        rp = np.sort(np.asarray(rp if rp is not None else [], dtype=float))
+        out = pd.Series(np.nan, index=output.index)
+        if rp.size == 0 or output.empty:
+            return out
+        pos = pd.Series(np.nan, index=output.index)
+        for w in ("R", "S", "Q"):
+            c = f"{w}_global_center_idx"
+            if c in output:
+                pos = pos.fillna(pd.to_numeric(output[c], errors="coerce"))
+        tol = 0.2 * float(self.sampling_rate)
+        for i, p in pos.items():
+            if np.isfinite(p):
+                j = int(np.argmin(np.abs(rp - p)))
+                if abs(rp[j] - p) <= tol:
+                    out[i] = rp[j]
+        return out
+
+    def _apply_boundary_layer(self, output: pd.DataFrame, ecg: np.ndarray) -> pd.DataFrame:
+        """
+        Supply clinical boundaries and intervals; keep Gaussian widths as morphology.
+
+        Gaussian per-wave widths (30%-height crossings on the fitted waves) are
+        renamed ``{wave}_width_ms``. For human / species-agnostic presets, wave
+        onsets/offsets come from :func:`pyhearts.processing.boundary_layer.
+        delineate_boundaries` and the interval columns are computed from them
+        (no imputation from neighboring beats; values outside physiological
+        limits are set to NaN). The mouse preset keeps Gaussian-edge intervals.
+        """
+        output = output.rename(columns={f"{w}_duration_ms": f"{w}_width_ms" for w in WAVES})
+        output[QRS_FIDUCIAL_COLUMN] = self._qrs_fiducials(output)
+        for col in BOUNDARY_COLUMNS.values():
+            output[col] = np.nan
+        if self.interval_source != "boundary_layer":
+            output["P_duration_ms"] = output.get("P_width_ms", np.nan)
+            return output
+        for col in LAYER_INTERVALS:
+            output[col] = np.nan
+        if output.empty:
+            return output
+        beats = output.reset_index(drop=True).copy()
+        # Anchor each beat on its fitted R; where no R was fitted (e.g. QS complexes,
+        # no positive deflection), anchor on the detected QRS fiducial instead.
+        r = pd.to_numeric(beats.get("R_global_center_idx"), errors="coerce")
+        beats["R_global_center_idx"] = r.fillna(beats[QRS_FIDUCIAL_COLUMN])
+        b = delineate_boundaries(ecg, float(self.sampling_rate), beats, self.boundary_params)
+        b.index = output.index
+        for key, col in BOUNDARY_COLUMNS.items():
+            output[col] = b[key]
+        ms = 1000.0 / float(self.sampling_rate)
+        for col, (start, end, (lo, hi)) in LAYER_INTERVALS.items():
+            v = (b[end] - b[start]) * ms
+            output[col] = v.where((v >= lo) & (v <= hi))
+        return output
 
     def save_output(self, file_id: str, results_dir: str):
         """
@@ -439,6 +532,13 @@ class PyHEARTS(_CorePyHEARTS):
             "sampling_rate_hz": self.sampling_rate,
             "species": self.species,
             "apply_record_t": self.apply_record_t,
+            "intervals": {
+                "source": self.interval_source,
+                "boundary_layer_version": BOUNDARY_LAYER_VERSION,
+                "boundary_params": asdict(self.boundary_params),
+                "physiological_limits_ms": {k: v[2] for k, v in LAYER_INTERVALS.items()},
+                "gaussian_width_columns": [f"{w}_width_ms" for w in WAVES],
+            },
             "core_config": asdict(self._core_cfg),
             "t_config": asdict(self._t_cfg),
             "last_record_t_stats": self.last_record_t_stats,

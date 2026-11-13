@@ -448,6 +448,8 @@ class PyHEARTS:
                     self.process_cycle_wrapper(one_cycle, cycle_idx)
                 except Exception as e:
                     logging.error(f"Error processing cycle {cycle_idx}: {e}")
+                    # Clear the warm start so one failed cycle cannot fail every later cycle.
+                    self.previous_gauss_features = None
                     continue
 
             self.output_df = pd.DataFrame.from_dict(self.output_dict, orient="columns")

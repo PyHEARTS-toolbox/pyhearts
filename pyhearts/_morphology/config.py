@@ -18,6 +18,8 @@ class ProcessCycleConfig:
     rpeak_bpm_bounds: Tuple[float, float] = (40.0, 900.0)  # clamp for RR estimate
     # Auto-detect inverted QRS / lead polarity and analyze on the uprighted trace.
     rpeak_auto_polarity: bool = True
+    rpeak_method: str = "prominence"   # "prominence" | "gradient" (NeuroKit2 port; human preset)
+    r_search_half_window_ms: Optional[float] = None  # R search window around the QRS fiducial; None = whole cycle
 
     # ----- Epoching thresholds (used in epoch_ecg) -----
     epoch_corr_thresh: float = 0.80      # min correlation to keep an epoch (0–1)
@@ -67,6 +69,11 @@ class ProcessCycleConfig:
     
      # ----- Curve-fit -----
     bound_factor: float = 0.20           # bounds scale around (center, height, std)
+    # |Gaussian height| may not exceed this multiple of the cycle's peak |detrended amplitude|.
+    # Without a cap, warm-start height bounds (previous height +/- bound_factor) can ratchet
+    # upward beat by beat; on long recordings R and S then converge on one center with large
+    # opposite heights that cancel (fit R^2 stays high but the parameters are meaningless).
+    max_height_factor: float = 1.5
     maxfev: int = 2500                   # scipy curve_fit eval cap
     detrend_window_ms: int = 150         # baseline detrend window (ms)
     postQRS_refractory_window_ms: int = 20    # small fixed refractory after QRS to avoid S tail (~20 ms in humans)
@@ -131,6 +138,7 @@ class ProcessCycleConfig:
 
         # curve-fit / preprocessing
         if not (0.0 < self.bound_factor < 1.0): raise ValueError("bound_factor in (0,1)")
+        if not (self.max_height_factor > 1.0): raise ValueError("max_height_factor > 1")
         if self.maxfev <= 0: raise ValueError("maxfev > 0")
         if self.detrend_window_ms <= 0: raise ValueError("detrend_window_ms > 0")
         if self.postQRS_refractory_window_ms <= 0: raise ValueError ("postQRS_refractory_window_ms > 0")
@@ -183,6 +191,8 @@ class ProcessCycleConfig:
             raise ValueError("rpeak_prominence_multiplier > 0")
         if self.rpeak_min_refrac_ms <= 0:
             raise ValueError("rpeak_min_refrac_ms > 0")
+        if self.rpeak_method not in ("prominence", "gradient"):
+            raise ValueError("rpeak_method must be 'prominence' or 'gradient'")
         if not (0.0 < self.rpeak_rr_frac_second_pass < 1.0):
             raise ValueError("rpeak_rr_frac_second_pass in (0,1)")
 
@@ -232,6 +242,11 @@ class ProcessCycleConfig:
             duration_min_ms=20,
             # Example tighter human bounds if desired:
             rpeak_bpm_bounds=(30.0, 240.0), rpeak_min_refrac_ms=120.0, # 500 bpm theoretical ceiling
+            rpeak_method="gradient",
+            # Lead II convention: R is the positive QRS deflection (clinical convention,
+            # matches cardiologist annotations). No polarity flip for the human preset.
+            rpeak_auto_polarity=False,
+            r_search_half_window_ms=50.0,
             version="v1-fitbounds-clip-human",
         )
 
