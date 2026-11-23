@@ -5,7 +5,10 @@ All notable changes to PyHEARTS will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.0] - 2026-11-23
+
+First public release, tagged `v1.0.0`. It includes every change below, made after the
+July 2026 pre-release snapshot.
 
 ### Fixed (Gaussian height cap)
 - Warm-started height bounds (previous height +/- `bound_factor`) could grow 20% per beat without limit.
@@ -148,15 +151,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   held-outs for paper-era parameters only. Local held-out corpora and the
   `validation/` harness are not shipped.
 
-## [1.0.0] - 2026-07-22
+## [1.0.0-pre] - 2026-07-22
 
-First public release of the PyHEARTS toolbox.
+Pre-release snapshot of the PyHEARTS toolbox (not tagged or published).
 
 ### Added
 - Installable package with `PyHEARTS` as the public analyzer.
 - Morphology core for R/P detection, cycle segmentation, and symmetric
   Gaussian fitting of P/Q/R/S/T waves.
-- Record-level record-level T stage at the end of `analyze_ecg`.
+- Record-level T stage at the end of `analyze_ecg`.
 - Explicit `T_gaussian_global_center_idx` alongside record-T `T_global_center_idx`.
 - Reproducible CSV + metadata export via `save_output` (package version plus
   pipeline tag and resolved configs).
