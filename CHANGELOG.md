@@ -5,18 +5,14 @@ All notable changes to PyHEARTS will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.1] - 2026-11-23
-
-### Changed
-- License: PyHEARTS is now available under the PolyForm Strict License 1.0.0, which permits
-  noncommercial use but not modification or redistribution. Version 1.0.0 granted no use without
-  written permission. `LICENSE.md` now also states that a patent is pending (SD2024-342-2).
-- No code changes. Outputs are identical to 1.0.0.
-
 ## [1.0.0] - 2026-11-23
 
 First public release, tagged `v1.0.0`. It includes every change below, made after the
 July 2026 pre-release snapshot.
+
+### License
+- PyHEARTS is licensed under the PolyForm Strict License 1.0.0, which permits noncommercial use but not
+  modification or redistribution. `LICENSE.md` states that a patent is pending (SD2024-342-2).
 
 ### Fixed (Gaussian height cap)
 - Warm-started height bounds (previous height +/- `bound_factor`) could grow 20% per beat without limit.

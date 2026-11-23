@@ -1,4 +1,4 @@
-"""Tests for curve_fit bound clipping defect repair (1.0.1)."""
+"""Tests for curve_fit bound clipping defect repair."""
 
 from __future__ import annotations
 
