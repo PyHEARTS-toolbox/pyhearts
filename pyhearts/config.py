@@ -791,7 +791,7 @@ class ProcessCycleConfig:
     @classmethod
     def for_human(cls) -> "ProcessCycleConfig":
         """
-        Human morphology preset without record-level record-T (per-cycle P/T only).
+        Human morphology preset without the record-level T stage (per-cycle P/T only).
 
         The public analyzer uses :meth:`for_human_unified` for its record-T config.
         This preset remains useful as a morphology-only baseline.

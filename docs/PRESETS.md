@@ -1,79 +1,65 @@
-# PyHEARTS pipeline presets
+# PyHEARTS configuration
 
-PyHEARTS exposes one public analyzer. Internally it uses a morphology-core
-config and a record-level T config; those dual configs are private.
+## Standard pipeline
 
-## Recommended human run
+`pyhearts.standard.run_standard` is the recommended entry point. It applies the
+same processing to every recording:
+
+- 0.5 to 50 Hz zero-phase Butterworth band-pass (order 4) and a 50 or 60 Hz
+  notch (Q = 30)
+- a check that the sampling rate matches the rate documented for the dataset
+- linear bridging of missing samples, exclusion of recordings with too many
+  missing samples, and removal of beats near missing data
+- the human analyzer preset described below
+
+```python
+from pyhearts.standard import run_standard
+
+ph, summary = run_standard(ecg, fs=500, expected_fs=500, mains_hz=60,
+                           record_id="subject_001", results_dir="results")
+```
+
+`summary` and the saved metadata JSON record the pipeline version
+(`standard-2`), the filter settings and the missing-data counts.
+
+## Analyzer presets
+
+`PyHEARTS(..., species=...)` selects the preset.
+
+| Setting | Behavior |
+|---------|----------|
+| `species="human"` | Human morphology preset, record-level T stage and wavelet boundary layer |
+| `species=None` | Species-agnostic morphology defaults, record-level T stage and wavelet boundary layer |
+| `species="mouse"` | Mouse morphology preset; record-level T stage off; intervals from Gaussian edges |
 
 ```python
 from pyhearts import PyHEARTS
 
-analyzer = PyHEARTS(
-    sampling_rate=500.0,
-    species="human",
-)
+analyzer = PyHEARTS(sampling_rate=500.0, species="human")
 features, cycles = analyzer.analyze_ecg(filtered_ecg)
 ```
 
-This selects the human morphology preset and enables the record-level T stage at the
-end of `analyze_ecg`.
+Advanced settings live in `pyhearts.config.ProcessCycleConfig`. Typical runs
+should not need them.
 
-## Species-agnostic defaults
+## What happens in `analyze_ecg`
 
-Useful when reproducing the SPH normal-repeat validation setting:
+1. R peaks are detected and the signal is split into cardiac cycles.
+2. One Gaussian is fitted to each of the P, Q, R, S and T waves of every cycle.
+3. The record-level T stage sets the global T-wave fiducial
+   (`T_global_center_idx`).
+4. Except for the mouse preset, a wavelet boundary layer anchored on the fitted peaks
+   places wave onsets and offsets, and the clinical intervals (PR, QRS, QT and
+   others) are computed from these boundaries.
+5. `save_output` records the package version, pipeline tag and resolved
+   settings.
 
-```python
-analyzer = PyHEARTS(sampling_rate=500.0)
-```
-
-record-level T remains enabled.
-
-## Mouse configuration
-
-```python
-analyzer = PyHEARTS(sampling_rate=2000.0, species="mouse")
-```
-
-Uses the mouse morphology preset and disables the human record-level T stage by default.
+R-peak detection corrects inverted QRS polarity by default
+(`rpeak_auto_polarity=True`); `analyzer.signal_inverted` records whether the
+signal was flipped.
 
 ## Heart rate variability
 
-Optional HRV (`analyzer.compute_hrv_metrics()`) uses successive intervals from
-the **detected R-peak series** (before epoch quality filtering), gated by
-`rr_bounds_ms`. It does not use morphology-retained `RR_interval_ms` rows.
-Requires ≥60 valid RR intervals; returns mean heart rate, SDNN, RMSSD, and NN50.
-
-Morphology R detection enables **auto-polarity** by default
-(`rpeak_auto_polarity=True`): inverted QRS / lead polarity is detected, the
-working trace is negated for analysis, and `analyzer.signal_inverted` records
-whether a flip occurred.
-
-## What happens under the hood
-
-1. Morphology detection finds R/P, segments cycles, and fits symmetric Gaussians.
-2. When record-T is enabled, `analyze_ecg` finishes by writing `T_global_center_idx`.
-3. `save_output` records package version, pipeline tag, and both private configs.
-
-There is no skewed-Gaussian runtime option.
-
-## QTDB annotation policy (development / benchmark)
-
-QTDB is a **development and benchmark** corpus (including the Dec 2024 default
-re-tune), not a held-out validation set for current public defaults.
-
-The manual QTDB morphology reference uses ECG1 (channel 0) with the ``q1c``
-cardiologist annotations. Treat these marks as a **reference** (report against
-published inter-annotator variability), not absolute ground truth. Synthetic
-R-peak stress tests in ``examples/sim_rpeak_*.py`` are a separate prerequisite
-and do not validate morphology.
-
-```python
-from pyhearts import load_wfdb_signal
-
-ecg, fs, lead_idx, lead_name = load_wfdb_signal(
-    "data/qtdb/sel46",
-    policy="first",
-)
-```
-
-Runnable reference script: ``examples/qtdb_morphology_reference.py``.
+`analyzer.compute_hrv_metrics()` uses the detected R-peak series, gated by
+`rr_bounds_ms`. It needs at least 60 valid RR intervals and returns mean heart
+rate, SDNN, RMSSD and NN50.

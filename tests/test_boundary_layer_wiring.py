@@ -42,7 +42,7 @@ def test_boundary_and_interval_columns(human_run):
     assert len(f) >= 15
     # Plausibility only. ECGSYN beats are not physiological templates (NeuroKit2's
     # own delineator measures ~140 ms QRS on this signal); accuracy is validated
-    # against expert annotations in validation/ (LUDB, QTDB) and PTB-XL+.
+    # separately against expert annotations (LUDB, QTDB) and PTB-XL+.
     for col in LAYER_INTERVALS:
         assert f[col].notna().mean() >= 0.8, col
     assert 40 <= f["QRS_interval_ms"].median() <= 250

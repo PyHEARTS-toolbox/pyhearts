@@ -365,7 +365,7 @@ class PyHEARTS(_CorePyHEARTS):
 
         Morphology detection segments beats and fits symmetric Gaussians for
         P/Q/R/S/T. When record-T is enabled (human / species-agnostic presets), a
-        record-level record-T stage overwrites ``T_global_center_idx`` while keeping
+        record-level T stage overwrites ``T_global_center_idx`` while keeping
         the Gaussian T center in ``T_gaussian_global_center_idx``.
 
         Parameters

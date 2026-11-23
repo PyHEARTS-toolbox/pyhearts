@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pyhearts"
 version = "1.0.0"
-description = "Beat-by-beat ECG morphology analysis with record-level record-level T detection"
+description = "Beat-by-beat ECG phenotyping from Gaussian models of every wave"
 readme = "README.md"
 license = "LicenseRef-Proprietary"
 license-files = ["LICENSE.md"]
@@ -35,7 +35,6 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Bio-Informatics",
     "Topic :: Scientific/Engineering :: Medical Science Apps.",
     "Typing :: Typed",
@@ -70,11 +69,6 @@ dev = [
     "pandas-stubs>=1.5.0",
     "twine>=5.0.0",
     "wfdb>=4.1.0",
-]
-docs = [
-    "sphinx>=6.0.0",
-    "sphinx-rtd-theme>=1.0.0",
-    "myst-parser>=1.0.0",
 ]
 
 [project.urls]
