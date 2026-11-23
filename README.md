@@ -79,6 +79,9 @@ python -m pytest
 
 ## License
 
-PyHEARTS is research software and is not a medical device. It is proprietary
-software of The Regents of the University of California; use requires prior
-written permission. See `LICENSE.md`.
+PyHEARTS is research software and is not a medical device. It is copyright The
+Regents of the University of California, patent pending (SD2024-342-2), and
+licensed under the [PolyForm Strict License 1.0.0](LICENSE.md). You may use it
+for noncommercial purposes such as academic research. You may not modify or
+redistribute it. For commercial licensing, contact the UC San Diego Office of
+Innovation and Commercialization at ucsdpatent@ucsd.edu.

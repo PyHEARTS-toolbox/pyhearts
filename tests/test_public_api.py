@@ -9,7 +9,7 @@ from pyhearts.core.analyzer import PyHEARTS as CorePyHEARTS
 
 
 def test_public_version_string():
-    assert pyhearts.__version__ == "1.0.0"
+    assert pyhearts.__version__ == "1.0.1"
     assert version("pyhearts") == pyhearts.__version__
 
 

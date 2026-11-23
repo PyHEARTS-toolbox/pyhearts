@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyhearts"
-version = "1.0.0"
+version = "1.0.1"
 description = "Beat-by-beat ECG phenotyping from Gaussian models of every wave"
 readme = "README.md"
-license = "LicenseRef-Proprietary"
+license = "LicenseRef-PolyForm-Strict-1.0.0"
 license-files = ["LICENSE.md"]
 authors = [
     {name = "Morgan Fitzgerald"}
