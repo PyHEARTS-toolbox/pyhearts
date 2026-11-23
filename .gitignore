@@ -115,8 +115,6 @@ raw_data/
 results/
 benchmark_results/
 
-# Held-out validation (local-only; not shipped in the toolbox)
-validation/
 
 # LUDB corpus and local held-out notes (not shipped)
 data/ludb/
@@ -323,3 +321,23 @@ examples/qtdb_peak_variability_analysis.py
 examples/sim_rpeak_harness.py
 examples/sim_rpeak_high_value.py
 examples/sim_rpeak_noise_sweep.py
+
+
+# Local folders
+Claude outputs/
+Nature Communications/
+
+# ---------------------------------------------------------------------------
+# Toolbox repo = core processing code only (pyhearts/, tests/, docs/, examples/,
+# README, CHANGELOG, LICENSE, pyproject, Makefile, CI). Everything below stays
+# local: validation, benchmarking, sensitivity and manuscript analysis code.
+# ---------------------------------------------------------------------------
+/validation/
+/manuscript/
+/REPRODUCE.md
+/sensitivity/
+/benchmarks/
+/benchmark/
+**/*sensitivity*
+**/*_sensitivity*/
+
